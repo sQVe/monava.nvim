@@ -1,0 +1,9 @@
+{
+  "name": "@test/ui",
+  "version": "1.0.0",
+  "dependencies": {
+    "react": "^18.0.0",
+    "@test/utils": "workspace:*"
+  }
+}
+EOF < /dev/null

@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Variables
+SCRIPT_NAME="$(basename "${0}")"
+PROJECT_ROOT="$(cd "$(dirname "${0}")/.." && pwd)"
+TEST_INIT_FILE="${PROJECT_ROOT}/tests/minimal_init.lua"
+
+# Functions
+print_help() {
+	cat <<EOF
+${SCRIPT_NAME} - Run tests for monava.nvim
+
+USAGE:
+    ${SCRIPT_NAME} [OPTIONS]
+
+OPTIONS:
+    -h, --help      Show this help message
+    -v, --verbose   Enable verbose output
+
+EXAMPLES:
+    ${SCRIPT_NAME}              Run all tests
+    ${SCRIPT_NAME} --verbose    Run tests with verbose output
+
+REQUIREMENTS:
+    - Neovim (nvim command available)
+    - Busted testing framework (installed via luarocks)
+    - Lazy.nvim (automatically downloaded during test initialization)
+
+EOF
+}
+
+print_error() {
+	echo "Error: ${1}" >&2
+}
+
+validate_dependencies() {
+	if ! command -v nvim >/dev/null 2>&1; then
+		print_error "nvim command not found. Please install Neovim."
+		exit 1
+	fi
+
+	if [[ ! -f "${TEST_INIT_FILE}" ]]; then
+		print_error "Test initialization file not found: ${TEST_INIT_FILE}"
+		exit 1
+	fi
+}
+
+run_tests() {
+	local verbose_flag=""
+
+	if [[ "${VERBOSE:-}" == "true" ]]; then
+		verbose_flag="--verbose"
+	fi
+
+	echo "Running tests for monava.nvim..."
+	echo "Project root: ${PROJECT_ROOT}"
+	echo "Test init file: ${TEST_INIT_FILE}"
+	echo
+
+	cd "${PROJECT_ROOT}"
+
+	# Run tests using Neovim with minimal init and minitest flag
+	nvim -l "${TEST_INIT_FILE}" --minitest ${verbose_flag}
+}
+
+# Parse command line arguments
+VERBOSE="false"
+
+while [[ $# -gt 0 ]]; do
+	case "${1}" in
+	-h | --help)
+		print_help
+		exit 0
+		;;
+	-v | --verbose)
+		VERBOSE="true"
+		shift
+		;;
+	*)
+		print_error "Unknown option: ${1}"
+		echo "Use --help for usage information."
+		exit 1
+		;;
+	esac
+done
+
+# Main execution
+main() {
+	validate_dependencies
+	run_tests
+}
+
+# Execute main function
+main "$@"

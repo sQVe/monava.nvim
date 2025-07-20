@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        neovim-version: ['stable', 'nightly', 'v0.8.0']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Neovim
+        uses: rhymond/setup-neovim@v1
+        with:
+          version: ${{ matrix.neovim-version }}
+      
+      - name: Setup Lua and LuaRocks
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
+      
+      - name: Install Busted
+        run: luarocks install busted
+      
+      - name: Cache test dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.local/share/nvim
+            .tests
+          key: ${{ runner.os }}-neovim-${{ matrix.neovim-version }}-${{ hashFiles('**/minimal_init.lua') }}
+          restore-keys: |
+            ${{ runner.os }}-neovim-${{ matrix.neovim-version }}-
+            ${{ runner.os }}-neovim-
+      
+      - name: Run tests
+        run: ./scripts/test
+      
+      - name: Install formatting tools
+        run: |
+          # Install stylua
+          wget -O stylua.zip https://github.com/JohnnyMorganz/StyLua/releases/latest/download/stylua-linux.zip
+          unzip stylua.zip
+          chmod +x stylua
+          sudo mv stylua /usr/local/bin/
+          
+          # Install shfmt
+          go install mvdan.cc/sh/v3/cmd/shfmt@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+      
+      - name: Check formatting
+        run: |
+          stylua --check lua/ tests/
+          shfmt -d scripts/
+      
+      - name: Install luacheck
+        run: luarocks install luacheck
+      
+      - name: Run linting
+        run: luacheck lua/ tests/
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 HEAD^)
+          
+          # Generate changelog
+          echo "## Changes since ${LATEST_TAG}" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          git log ${LATEST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges >> CHANGELOG.md
+          
+          # Set output
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat CHANGELOG.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Create release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: false

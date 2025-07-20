@@ -1,0 +1,95 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        neovim-version: ['stable', 'nightly', 'v0.8.0']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Neovim
+        uses: rhymond/setup-neovim@v1
+        with:
+          version: ${{ matrix.neovim-version }}
+      
+      - name: Setup Lua and LuaRocks
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
+      
+      - name: Install Busted
+        run: luarocks install busted
+      
+      - name: Cache test dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.local/share/nvim
+            .tests
+          key: ${{ runner.os }}-neovim-${{ matrix.neovim-version }}-${{ hashFiles('**/minimal_init.lua') }}
+          restore-keys: |
+            ${{ runner.os }}-neovim-${{ matrix.neovim-version }}-
+            ${{ runner.os }}-neovim-
+      
+      - name: Run tests
+        run: ./scripts/test
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Lua and LuaRocks
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
+      
+      - name: Install luacheck
+        run: luarocks install luacheck
+      
+      - name: Run luacheck
+        run: luacheck lua/ tests/
+
+  format:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install stylua
+        run: |
+          wget -O stylua.zip https://github.com/JohnnyMorganz/StyLua/releases/latest/download/stylua-linux.zip
+          unzip stylua.zip
+          chmod +x stylua
+          sudo mv stylua /usr/local/bin/
+      
+      - name: Install shfmt
+        run: |
+          go install mvdan.cc/sh/v3/cmd/shfmt@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+      
+      - name: Check Lua formatting
+        run: stylua --check lua/ tests/
+      
+      - name: Check shell formatting
+        run: shfmt -d scripts/
