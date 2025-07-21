@@ -16,10 +16,12 @@ A Neovim plugin that provides intelligent navigation and management for monorepo
 ## 🏗️ Supported Monorepo Types
 
 ### Tier 1 (Implemented)
+
 - **JavaScript/TypeScript**: NPM/Yarn/PNPM workspaces, Nx, Lerna
 - **Rust**: Cargo workspaces
 
 ### Tier 2 (Planned)
+
 - **Python**: Poetry monorepos
 - **Go**: Multi-module repositories
 - **Java**: Gradle/Maven multi-module
@@ -63,6 +65,7 @@ use {
   end
 }
 ```
+
 </details>
 
 ## ⚡ Usage
@@ -98,16 +101,16 @@ vim.keymap.set('n', '<leader>mi', '<cmd>Monava info<cr>', { desc = 'Monava: info
 require('monava').setup({
   -- Debug mode
   debug = false,
-  
+
   -- Picker preferences (in order of preference)
   picker_priority = { 'telescope', 'fzf-lua', 'snacks' },
-  
+
   -- Cache settings
   cache = {
     enabled = true,
     ttl = 300, -- 5 minutes
   },
-  
+
   -- Detection settings
   detection = {
     max_depth = 3,
@@ -118,7 +121,7 @@ require('monava').setup({
       -- ... more patterns
     },
   },
-  
+
   -- Keymaps (set to false to disable)
   keymaps = {
     packages = '<leader>mp',
@@ -129,11 +132,13 @@ require('monava').setup({
   },
 })
 ```
+
 </details>
 
 ## 🩺 Health Check
 
 Run `:checkhealth monava` to verify:
+
 - Neovim version compatibility
 - Available picker backends
 - Monorepo detection in current directory
@@ -158,7 +163,7 @@ Contributions are welcome! This plugin is in active development.
 ### Development Setup
 
 1. Clone the repository
-2. Run tests: `lua test_plugin.lua`
+2. Run tests: `./scripts/test`
 3. Follow the established patterns in `lua/monava/`
 
 ## 📝 License

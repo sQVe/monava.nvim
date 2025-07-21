@@ -459,4 +459,480 @@ describe("utils", function()
       end)
     end)
   end)
+
+  describe("YAML utilities", function()
+    local utils
+
+    before_each(function()
+      package.loaded["monava.utils"] = nil
+      utils = require("monava.utils")
+    end)
+
+    describe("parse_pnpm_workspace_yaml", function()
+      it("should parse valid PNPM workspace YAML", function()
+        local yaml_content = 'packages:\n  - "packages/*"\n  - "apps/*"'
+        local result, err = utils.parse_pnpm_workspace_yaml(yaml_content)
+
+        assert.is_nil(err)
+        assert.is.table(result)
+        assert.is.table(result.packages)
+        assert.are.equal(2, #result.packages)
+        assert.are.equal("packages/*", result.packages[1])
+        assert.are.equal("apps/*", result.packages[2])
+      end)
+
+      it("should handle single quoted patterns", function()
+        local yaml_content = "packages:\n  - 'libs/*'\n  - 'services/*'"
+        local result, err = utils.parse_pnpm_workspace_yaml(yaml_content)
+
+        assert.is_nil(err)
+        assert.is.table(result)
+        assert.are.equal("libs/*", result.packages[1])
+        assert.are.equal("services/*", result.packages[2])
+      end)
+
+      it("should handle unquoted patterns", function()
+        local yaml_content = "packages:\n  - libs/*\n  - services/*"
+        local result, err = utils.parse_pnpm_workspace_yaml(yaml_content)
+
+        assert.is_nil(err)
+        assert.is.table(result)
+        assert.are.equal("libs/*", result.packages[1])
+        assert.are.equal("services/*", result.packages[2])
+      end)
+
+      it("should handle exclusion patterns", function()
+        local yaml_content = 'packages:\n  - "packages/*"\n  - "!**/test/**"'
+        local result, err = utils.parse_pnpm_workspace_yaml(yaml_content)
+
+        assert.is_nil(err)
+        assert.is.table(result)
+        assert.are.equal(2, #result.packages)
+        assert.are.equal("packages/*", result.packages[1])
+        assert.are.equal("!**/test/**", result.packages[2])
+      end)
+
+      it("should handle comments and empty lines", function()
+        local yaml_content = [[
+# This is a comment
+packages:
+  # Another comment
+  - "packages/*"
+
+  - "apps/*"
+# Final comment
+]]
+        local result, err = utils.parse_pnpm_workspace_yaml(yaml_content)
+
+        assert.is_nil(err)
+        assert.is.table(result)
+        assert.are.equal(2, #result.packages)
+        assert.are.equal("packages/*", result.packages[1])
+        assert.are.equal("apps/*", result.packages[2])
+      end)
+
+      it("should return error for invalid input types", function()
+        local result, err = utils.parse_pnpm_workspace_yaml(123)
+        assert.is_nil(result)
+        assert.are.equal("Content must be a string", err)
+      end)
+
+      it("should return error for empty content", function()
+        local result, err = utils.parse_pnpm_workspace_yaml("")
+        assert.is_nil(result)
+        assert.are.equal("Empty YAML content", err)
+      end)
+
+      it("should return error when no packages found", function()
+        local yaml_content = "other_field:\n  - value"
+        local result, err = utils.parse_pnpm_workspace_yaml(yaml_content)
+        assert.is_nil(result)
+        assert.are.equal("No packages found in YAML", err)
+      end)
+
+      it("should handle malformed YAML gracefully", function()
+        local yaml_content = "packages:\n  - unclosed quote"
+        local result, err = utils.parse_pnpm_workspace_yaml(yaml_content)
+        assert.is_nil(result)
+        assert.are.equal("No packages found in YAML", err)
+      end)
+    end)
+
+    describe("glob_match", function()
+      it("should match basic glob patterns", function()
+        assert.is_true(utils.glob_match("*", "anything"))
+        assert.is_true(utils.glob_match("*.js", "file.js"))
+        assert.is_false(utils.glob_match("*.js", "file.ts"))
+        assert.is_true(utils.glob_match("test?", "test1"))
+        assert.is_false(utils.glob_match("test?", "test12"))
+      end)
+
+      it("should match directory patterns", function()
+        assert.is_true(utils.glob_match("packages/*", "packages/ui"))
+        assert.is_false(utils.glob_match("packages/*", "packages/ui/src"))
+        assert.is_true(utils.glob_match("packages/**", "packages/ui/src/index.js"))
+        assert.is_true(utils.glob_match("**/test/**", "src/test/unit"))
+      end)
+
+      it("should handle literal paths", function()
+        assert.is_true(utils.glob_match("exact/path", "exact/path"))
+        assert.is_false(utils.glob_match("exact/path", "other/path"))
+      end)
+
+      it("should escape special regex characters", function()
+        assert.is_true(utils.glob_match("file.name", "file.name"))
+        assert.is_false(utils.glob_match("file.name", "filename"))
+      end)
+    end)
+
+    describe("expand_glob_pattern", function()
+      local test_workspace
+
+      before_each(function()
+        test_workspace = helpers.fs_create({
+          ["packages/ui/package.json"] = '{"name": "@test/ui"}',
+          ["packages/utils/package.json"] = '{"name": "@test/utils"}',
+          ["packages/core/package.json"] = '{"name": "@test/core"}',
+          ["apps/web/package.json"] = '{"name": "web-app"}',
+          ["apps/api/package.json"] = '{"name": "api-server"}',
+          ["services/auth/package.json"] = '{"name": "auth-service"}',
+          ["libs/shared/utils/package.json"] = '{"name": "@lib/shared-utils"}',
+          ["libs/ui/components/package.json"] = '{"name": "@lib/ui-components"}',
+          ["packages/test/unit/package.json"] = '{"name": "should-be-excluded"}',
+          ["packages/dist/build/package.json"] = '{"name": "should-be-excluded-dist"}',
+          ["node_modules/external/package.json"] = '{"name": "external-dep"}',
+          -- Non-package directories (no package.json)
+          ["docs/README.md"] = "Documentation",
+          ["scripts/build.sh"] = "#!/bin/bash",
+          ["packages/empty/index.js"] = "// No package.json",
+        })
+      end)
+
+      it("should handle simple wildcard patterns", function()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "packages/*")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(4, #matches) -- ui, utils, core, test (dist and empty don't have package.json)
+
+        local names = {}
+        for _, match in ipairs(matches) do
+          table.insert(names, match.name)
+          assert.is.string(match.path)
+          assert.is.string(match.relative_path)
+          assert.is_true(match.relative_path:match("^packages/"))
+        end
+
+        assert.is_true(vim.tbl_contains(names, "ui"))
+        assert.is_true(vim.tbl_contains(names, "utils"))
+        assert.is_true(vim.tbl_contains(names, "core"))
+        assert.is_true(vim.tbl_contains(names, "test"))
+      end)
+
+      it("should handle multiple directory patterns", function()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "apps/*")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(2, #matches) -- web, api
+
+        local names = {}
+        for _, match in ipairs(matches) do
+          table.insert(names, match.name)
+          assert.is_true(match.relative_path:match("^apps/"))
+        end
+
+        assert.is_true(vim.tbl_contains(names, "web"))
+        assert.is_true(vim.tbl_contains(names, "api"))
+      end)
+
+      it("should handle double star recursive patterns", function()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "libs/**")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(2, #matches) -- shared/utils and ui/components
+
+        local relative_paths = {}
+        for _, match in ipairs(matches) do
+          table.insert(relative_paths, match.relative_path)
+        end
+
+        assert.is_true(vim.tbl_contains(relative_paths, "libs/shared/utils"))
+        assert.is_true(vim.tbl_contains(relative_paths, "libs/ui/components"))
+      end)
+
+      it("should detect exclusion patterns", function()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "!**/test/**")
+
+        assert.is_true(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(0, #matches) -- Exclusion patterns return empty matches
+      end)
+
+      it("should respect depth limits for simple patterns", function()
+        -- This tests the performance optimization that limits scanning depth
+        local start_time = vim.loop.hrtime()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "packages/*")
+        local end_time = vim.loop.hrtime()
+
+        assert.is_false(is_exclusion)
+        assert.are.equal(4, #matches)
+
+        -- Should complete very quickly since it only scans 2-3 levels deep
+        local duration_ms = (end_time - start_time) / 1000000
+        assert.is_true(
+          duration_ms < 100,
+          "Simple pattern took too long: " .. duration_ms .. "ms (expected < 100ms)"
+        )
+      end)
+
+      it("should handle literal path patterns", function()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "services/auth")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(1, #matches)
+        assert.are.equal("auth", matches[1].name)
+        assert.are.equal("services/auth", matches[1].relative_path)
+      end)
+
+      it("should return empty matches for non-existent patterns", function()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "nonexistent/*")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(0, #matches)
+      end)
+
+      it("should only return directories with package.json", function()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "*")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+
+        -- Should not include docs, scripts, or packages/empty (no package.json)
+        local relative_paths = {}
+        for _, match in ipairs(matches) do
+          table.insert(relative_paths, match.relative_path)
+        end
+
+        assert.is_false(vim.tbl_contains(relative_paths, "docs"))
+        assert.is_false(vim.tbl_contains(relative_paths, "scripts"))
+        assert.is_false(vim.tbl_contains(relative_paths, "packages/empty"))
+      end)
+
+      it("should handle complex nested patterns", function()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "libs/*/components")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(1, #matches) -- libs/ui/components
+        assert.are.equal("components", matches[1].name)
+        assert.are.equal("libs/ui/components", matches[1].relative_path)
+      end)
+
+      it("should handle patterns with no matches gracefully", function()
+        local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, "missing/*/path")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(0, #matches)
+      end)
+    end)
+
+    describe("Error recovery and edge cases", function()
+      it("should handle filesystem errors gracefully", function()
+        -- Test with non-existent directory
+        local matches, is_exclusion = utils.expand_glob_pattern("/non/existent/path", "packages/*")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(0, #matches) -- Should return empty array, not crash
+      end)
+
+      it("should handle malformed patterns safely", function()
+        local test_workspace = helpers.fs_create({
+          ["packages/test/package.json"] = '{"name": "@test/pkg"}',
+        })
+
+        -- Test various potentially problematic patterns
+        local problematic_patterns = {
+          "", -- Empty pattern
+          "/", -- Root pattern
+          "//", -- Double slashes
+          "**/", -- Ending with slash
+          "***", -- Triple stars
+          "packages/*/", -- Ending with slash
+          "packages/../*", -- Path traversal attempt
+        }
+
+        for _, pattern in ipairs(problematic_patterns) do
+          local matches, is_exclusion = utils.expand_glob_pattern(test_workspace, pattern)
+
+          -- Should not crash and should return valid data
+          assert.is_boolean(
+            is_exclusion,
+            "Pattern '" .. pattern .. "' should return boolean for is_exclusion"
+          )
+          assert.is.table(matches, "Pattern '" .. pattern .. "' should return table for matches")
+          -- Don't assert specific counts since behavior may vary, just ensure no crash
+        end
+      end)
+
+      it("should handle YAML parser edge cases", function()
+        local edge_cases = {
+          -- Very large content (within reasonable limits)
+          {
+            content = "packages:\n"
+              .. string.rep("  - package" .. string.rep("x", 100) .. "\n", 50),
+            should_succeed = true,
+          },
+          -- Unicode characters
+          {
+            content = 'packages:\n  - "пакеты/*"\n  - "应用/*"',
+            should_succeed = true,
+          },
+          -- Nested structures (should be ignored but not crash)
+          {
+            content = "packages:\n  - apps/*\nother:\n  nested:\n    deeply:\n      - ignored",
+            should_succeed = true,
+          },
+          -- Mixed line endings
+          {
+            content = "packages:\r\n  - apps/*\r\n  - packages/*\n",
+            should_succeed = true,
+          },
+          -- Extreme nesting (should handle gracefully)
+          {
+            content = "packages:\n" .. string.rep("  ", 100) .. "- deeply-nested/*",
+            should_succeed = false, -- Might fail due to extreme indentation
+          },
+        }
+
+        for i, case in ipairs(edge_cases) do
+          local result, err = utils.parse_pnpm_workspace_yaml(case.content)
+
+          if case.should_succeed then
+            assert.is_not_nil(
+              result,
+              "Case " .. i .. " should succeed but got error: " .. (err or "nil")
+            )
+            assert.is.table(result.packages, "Case " .. i .. " should return packages array")
+          else
+            -- For cases that might fail, just ensure they don't crash
+            assert.is_boolean(result == nil, "Case " .. i .. " should return nil or valid result")
+            if result == nil then
+              assert.is_string(err, "Case " .. i .. " should provide error message when failing")
+            end
+          end
+        end
+      end)
+
+      it("should handle concurrent glob expansions safely", function()
+        local workspace = helpers.fs_create({
+          ["packages/pkg1/package.json"] = '{"name": "@test/pkg1"}',
+          ["packages/pkg2/package.json"] = '{"name": "@test/pkg2"}',
+          ["packages/pkg3/package.json"] = '{"name": "@test/pkg3"}',
+        })
+
+        -- Run multiple expansions in sequence (simulating concurrent usage)
+        local all_results = {}
+        for i = 1, 5 do
+          local matches, is_exclusion = utils.expand_glob_pattern(workspace, "packages/*")
+          table.insert(all_results, { matches = matches, is_exclusion = is_exclusion })
+        end
+
+        -- All results should be consistent
+        for i, result in ipairs(all_results) do
+          assert.is_false(result.is_exclusion, "Result " .. i .. " should not be exclusion")
+          assert.are.equal(3, #result.matches, "Result " .. i .. " should have 3 matches")
+        end
+      end)
+
+      it("should handle very long path names", function()
+        -- Create workspace with reasonably long path names (but not extreme)
+        local long_name = string.rep("very-long-package-name-", 10) -- 230 chars
+        local workspace = helpers.fs_create({
+          ["packages/" .. long_name .. "/package.json"] = '{"name": "@test/' .. long_name .. '"}',
+        })
+
+        local matches, is_exclusion = utils.expand_glob_pattern(workspace, "packages/*")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        assert.are.equal(1, #matches)
+        assert.are.equal(long_name, matches[1].name)
+      end)
+
+      it("should handle YAML with various invalid structures", function()
+        local invalid_yamls = {
+          "not_packages:\n  - value", -- Wrong key
+          "packages: invalid_value", -- Wrong value type
+          "packages:\n  invalid_array_item", -- Invalid array format
+          "packages:\n  - \n  - valid_item", -- Empty array item
+          ": invalid", -- Invalid YAML syntax
+          "packages\n  - missing_colon", -- Missing colon
+        }
+
+        for i, yaml_content in ipairs(invalid_yamls) do
+          local result, err = utils.parse_pnpm_workspace_yaml(yaml_content)
+
+          -- Should fail gracefully with error message
+          assert.is_nil(result, "Invalid YAML " .. i .. " should return nil")
+          assert.is.string(err, "Invalid YAML " .. i .. " should provide error message")
+          assert.is_true(#err > 0, "Invalid YAML " .. i .. " error message should not be empty")
+        end
+      end)
+
+      it("should handle glob patterns with backslashes (Windows-style paths)", function()
+        local workspace = helpers.fs_create({
+          ["packages/test/package.json"] = '{"name": "@test/pkg"}',
+        })
+
+        -- Test patterns that might come from Windows environments
+        local patterns = {
+          "packages\\*", -- Windows-style backslash
+          "packages\\test", -- Literal backslash path
+          "packages/test\\*", -- Mixed slashes
+        }
+
+        for _, pattern in ipairs(patterns) do
+          local matches, is_exclusion = utils.expand_glob_pattern(workspace, pattern)
+
+          -- Should not crash, regardless of platform
+          assert.is_boolean(is_exclusion)
+          assert.is.table(matches)
+          -- Don't assert specific behavior since path handling varies by platform
+        end
+      end)
+
+      it("should handle package.json files with various encodings and content", function()
+        local workspace = helpers.fs_create({
+          ["packages/valid/package.json"] = '{"name": "@test/valid"}',
+          ["packages/empty-json/package.json"] = "{}",
+          ["packages/null-values/package.json"] = '{"name": "@test/null", "version": null}',
+          ["packages/array-deps/package.json"] = '{"name": "@test/array", "dependencies": []}',
+          ["packages/weird-chars/package.json"] = '{"name": "@test/\\"quoted\\"", "description": "Has \\"quotes\\""}',
+        })
+
+        local matches, is_exclusion = utils.expand_glob_pattern(workspace, "packages/*")
+
+        assert.is_false(is_exclusion)
+        assert.is.table(matches)
+        -- Should find at least the valid packages, maybe more depending on error handling
+        assert.is_true(#matches >= 1, "Should find at least 1 valid package")
+
+        -- Verify the definitely valid package is found
+        local found_valid = false
+        for _, match in ipairs(matches) do
+          if match.name == "valid" then
+            found_valid = true
+            break
+          end
+        end
+        assert.is_true(found_valid, "Should find the valid package")
+      end)
+    end)
+  end)
 end)

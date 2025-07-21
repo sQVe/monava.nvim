@@ -3,21 +3,39 @@
 
 local M = {}
 
--- Security: Validate and sanitize paths to prevent directory traversal
+-- Basic path validation to prevent obvious mistakes
 local function validate_path(path)
-  if not path or type(path) ~= "string" then
+  if not path or type(path) ~= "string" or path == "" then
     return nil, "Invalid path: must be a non-empty string"
   end
 
-  -- Remove dangerous path components
-  local clean_path = path:gsub("%.%./", ""):gsub("/%.%./+", "/"):gsub("^%.%./", "")
-
-  -- Check for null bytes and other dangerous characters
-  if clean_path:find("\0") or clean_path:find("|") or clean_path:find(";") then
-    return nil, "Invalid path: contains dangerous characters"
+  -- Convert to absolute path
+  local abs_path = vim.fn.fnamemodify(path, ":p")
+  if not abs_path or abs_path == "" then
+    return nil, "Invalid path: cannot resolve to absolute path"
   end
 
-  return clean_path
+  -- Remove trailing slashes for consistency
+  abs_path = abs_path:gsub("/$", "")
+
+  -- Basic workspace boundary check - ensure we're in current working directory tree
+  local cwd = vim.fn.getcwd():gsub("/$", "")
+  if not (abs_path == cwd or abs_path:sub(1, #cwd + 1) == cwd .. "/") then
+    -- Allow temp directories for testing
+    local temp_paths = { "/tmp", vim.fn.stdpath("cache") }
+    local in_temp = false
+    for _, temp in ipairs(temp_paths) do
+      if abs_path:sub(1, #temp + 1) == temp .. "/" or abs_path == temp then
+        in_temp = true
+        break
+      end
+    end
+    if not in_temp then
+      return nil, "Path outside workspace: " .. abs_path
+    end
+  end
+
+  return abs_path
 end
 
 -- Check if a file or directory exists

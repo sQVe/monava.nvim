@@ -151,6 +151,7 @@ make install-hooks
 ```
 
 The pre-commit hooks will:
+
 - Format Lua files with `stylua`
 - Format shell scripts with `shfmt`
 - Run linting with `luacheck`
@@ -172,6 +173,7 @@ make test          # Run test suite
 ### GitHub Actions
 
 The CI/CD pipeline runs on:
+
 - **Push/PR**: Test suite, linting, and formatting checks
 - **Release tags**: Full test suite + automated release creation
 

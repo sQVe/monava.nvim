@@ -6,6 +6,8 @@ local M = {}
 -- Import sub-modules.
 M.fs = require("monava.utils.fs")
 M.cache = require("monava.utils.cache")
+M.glob = require("monava.utils.glob")
+M.async = require("monava.utils.async")
 
 -- String utilities.
 function M.starts_with(str, prefix)
@@ -143,12 +145,12 @@ function M.encode_json(data, max_depth)
   end
 end
 
--- Simple async utilities for basic operations.
+-- Secure async utilities with allowlist validation and proper escaping.
 function M.run_async(cmd, callback, opts)
   opts = opts or {}
-  local timeout = opts.timeout or 30000 -- 30 second default
+  local timeout = math.min(opts.timeout or 30000, 120000) -- Cap at 2 minutes
 
-  -- Basic validation
+  -- Validate inputs.
   if type(cmd) ~= "table" or #cmd == 0 then
     if callback then
       callback(-1, "", "Invalid command: must be non-empty table")
@@ -160,18 +162,77 @@ function M.run_async(cmd, callback, opts)
     error("Callback must be a function")
   end
 
-  -- Basic argument validation (prevent accidents)
+  -- Security: Define allowed commands to prevent arbitrary command execution.
+  local ALLOWED_COMMANDS = {
+    "git",
+    "npm",
+    "yarn",
+    "pnpm",
+    "cargo",
+    "node",
+    "rustc",
+    -- Add more as needed, but keep minimal for security.
+  }
+
+  -- Validate base command against allowlist.
+  local base_command = cmd[1]
+  if type(base_command) ~= "string" or base_command == "" then
+    if callback then
+      callback(-1, "", "Invalid base command: must be non-empty string")
+    end
+    return nil
+  end
+
+  -- Security check: Only allow whitelisted commands.
+  local command_allowed = false
+  for _, allowed_cmd in ipairs(ALLOWED_COMMANDS) do
+    if base_command == allowed_cmd or base_command:match("/" .. allowed_cmd .. "$") then
+      command_allowed = true
+      break
+    end
+  end
+
+  if not command_allowed then
+    if callback then
+      callback(-1, "", "Command not allowed for security reasons: " .. base_command)
+    end
+    return nil
+  end
+
+  -- Security: Validate and sanitize all command arguments.
+  local clean_cmd = {}
   for i, arg in ipairs(cmd) do
-    if type(arg) ~= "string" and type(arg) ~= "number" then
+    if type(arg) == "string" then
+      -- Basic validation.: no control characters or dangerous sequences.
+      if
+        arg:find("[\0-\31]")
+        or arg:find("&&")
+        or arg:find("||")
+        or arg:find(">>")
+        or arg:find("<<")
+      then
+        if callback then
+          callback(-1, "", "Command argument contains dangerous characters: " .. arg)
+        end
+        return nil
+      end
+      table.insert(clean_cmd, arg)
+    elseif type(arg) == "number" then
+      table.insert(clean_cmd, tostring(arg))
+    else
+      -- Only allow strings and numbers as arguments.
       if callback then
         callback(-1, "", "Invalid argument type: " .. type(arg))
       end
       return nil
     end
-    -- Convert numbers to strings
-    if type(arg) == "number" then
-      cmd[i] = tostring(arg)
+  end
+
+  if #clean_cmd == 0 then
+    if callback then
+      callback(-1, "", "No valid command arguments after validation")
     end
+    return nil
   end
 
   local stdout = vim.loop.new_pipe(false)
@@ -206,7 +267,7 @@ function M.run_async(cmd, callback, opts)
     end
   end
 
-  -- Set up timeout
+  -- Set up timeout.
   timer = vim.loop.new_timer()
   timer:start(timeout, 0, function()
     cleanup()
@@ -215,12 +276,12 @@ function M.run_async(cmd, callback, opts)
     end)
   end)
 
-  -- Start the process
-  handle = vim.loop.spawn(cmd[1], {
-    args = vim.list_slice(cmd, 2),
+  handle = vim.loop.spawn(clean_cmd[1], {
+    args = vim.list_slice(clean_cmd, 2),
     stdio = { nil, stdout, stderr },
   }, function(code, signal)
     cleanup()
+
     vim.schedule(function()
       callback(code, table.concat(stdout_data), table.concat(stderr_data))
     end)
@@ -234,9 +295,9 @@ function M.run_async(cmd, callback, opts)
     return nil
   end
 
-  -- Read from pipes
   stdout:read_start(function(err, data)
     if err then
+      -- Handle read errors gracefully.
       return
     end
     if data then
@@ -246,6 +307,7 @@ function M.run_async(cmd, callback, opts)
 
   stderr:read_start(function(err, data)
     if err then
+      -- Handle read errors gracefully.
       return
     end
     if data then
@@ -338,110 +400,12 @@ end
 
 -- Glob pattern matching utility for workspace patterns.
 function M.glob_match(pattern, path)
-  -- Convert glob pattern to Lua pattern.
-  local lua_pattern = pattern
-
-  -- Escape special Lua pattern characters except our glob characters.
-  lua_pattern = lua_pattern:gsub("([%^%$%(%)%%%.%[%]%+%-])", "%%%1")
-
-  -- Convert glob patterns to Lua patterns
-  lua_pattern = lua_pattern:gsub("%*%*", "DOUBLESTAR") -- Temporarily replace **
-  lua_pattern = lua_pattern:gsub("%*", "SINGLESTAR") -- Temporarily replace *
-  lua_pattern = lua_pattern:gsub("%?", "QUESTION") -- Temporarily replace ?
-
-  -- Convert our placeholders to Lua patterns.
-  lua_pattern = lua_pattern:gsub("DOUBLESTAR", ".*") -- ** -> .*
-  lua_pattern = lua_pattern:gsub("SINGLESTAR", "[^/]*") -- * -> [^/]*
-  lua_pattern = lua_pattern:gsub("QUESTION", ".") -- ? -> .
-
-  -- Anchor pattern.
-  lua_pattern = "^" .. lua_pattern .. "$"
-
-  return path:match(lua_pattern) ~= nil
+  return M.glob.glob_match(pattern, path)
 end
 
--- Expand glob patterns to find matching directories with simple limits.
+-- Expand glob patterns to find matching directories with resource exhaustion protection.
 function M.expand_glob_pattern(root_path, pattern, options)
-  local matches = {}
-  local max_matches = (options and options.max_matches) or 1000 -- Simple limit
-  local max_depth = (options and options.max_depth) or 10 -- Simple depth limit
-
-  -- Handle exclusion patterns (patterns starting with !).
-  if pattern:match("^!") then
-    return matches, true -- Return empty matches and indicate it's an exclusion
-  end
-
-  -- Parse pattern into components.
-  local parts = {}
-  for part in pattern:gmatch("[^/]+") do
-    table.insert(parts, part)
-  end
-
-  if #parts == 0 then
-    return matches, false
-  end
-
-  -- Simple recursive scanning
-  local function scan_recursive(current_path, current_relative, part_index, depth)
-    if part_index > #parts or depth > max_depth or #matches >= max_matches then
-      return
-    end
-
-    local part = parts[part_index]
-    local is_last_part = part_index == #parts
-
-    local handle = vim.loop.fs_scandir(current_path)
-    if not handle then
-      return
-    end
-
-    while true do
-      local name, type = vim.loop.fs_scandir_next(handle)
-      if not name or #matches >= max_matches then
-        break
-      end
-
-      if type == "directory" then
-        local matches_part
-
-        if part == "*" or part == "**" then
-          matches_part = true
-        else
-          matches_part = M.glob_match(part, name)
-        end
-
-        if matches_part then
-          local full_path = current_path .. "/" .. name
-          local rel_path = current_relative == "" and name or current_relative .. "/" .. name
-
-          if is_last_part then
-            -- Check for package.json
-            local package_json = full_path .. "/package.json"
-            local stat = vim.loop.fs_stat(package_json)
-            if stat and stat.type == "file" then
-              table.insert(matches, {
-                name = name,
-                path = full_path,
-                relative_path = rel_path,
-              })
-            end
-          else
-            -- Continue to next part
-            if part == "**" then
-              -- For **, try both staying at current part and moving to next
-              scan_recursive(full_path, rel_path, part_index, depth + 1)
-              scan_recursive(full_path, rel_path, part_index + 1, depth + 1)
-            else
-              scan_recursive(full_path, rel_path, part_index + 1, depth + 1)
-            end
-          end
-        end
-      end
-    end
-  end
-
-  scan_recursive(root_path, "", 1, 0)
-  return matches, false
+  return M.glob.expand_glob_pattern(root_path, pattern, options)
 end
 
 -- Error handling utilities

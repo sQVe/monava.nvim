@@ -765,37 +765,32 @@ function M._get_lerna_packages(root_path)
 end
 
 function M._get_pnpm_packages(root_path)
-  if not root_path or root_path == "" then
-    return {}
-  end
-
-  local start_time = vim.loop.hrtime()
-  local workspace_file = utils.path_join(root_path, "pnpm-workspace.yaml")
+  local pnpm_parser = require("monava.parsers.pnpm")
+  local parser = pnpm_parser.new({ debug = M.config and M.config.debug })
+  return parser:parse_workspace(root_path)
 
   -- Check if pnpm-workspace.yaml exists.
-  if not fs.exists(workspace_file) then
+  if not pnpm_utils.fs.exists(workspace_file) then
     return {}
   end
 
   -- Read and parse the workspace file.
-  local content = fs.read_file(workspace_file)
+  local content = pnpm_utils.fs.read_file(workspace_file)
   if not content then
-    utils.warn("Failed to read pnpm-workspace.yaml")
+    pnpm_utils.warn("Failed to read pnpm-workspace.yaml")
     return {}
   end
 
-  local workspace_config, parse_error = utils.parse_pnpm_workspace_yaml(content)
+  local workspace_config, parse_error = pnpm_utils.parse_pnpm_workspace_yaml(content)
   if not workspace_config then
-    utils.warn("Failed to parse pnpm-workspace.yaml: " .. (parse_error or "unknown error"))
+    pnpm_utils.warn("Failed to parse pnpm-workspace.yaml: " .. (parse_error or "unknown error"))
     return {}
   end
 
-  if M.config and M.config.debug then
-    local parse_time = vim.loop.hrtime()
-    utils.debug(
-      string.format("PNPM workspace parsing took %.2fms", (parse_time - start_time) / 1000000)
-    )
-  end
+  local parse_time = vim.loop.hrtime()
+  pnpm_utils.debug(
+    string.format("PNPM workspace parsing took %.2fms", (parse_time - start_time) / 1000000)
+  )
 
   local packages = {}
   local exclusions = {}
@@ -803,19 +798,17 @@ function M._get_pnpm_packages(root_path)
   -- Process each pattern in the workspace config.
   for _, pattern in ipairs(workspace_config.packages) do
     local pattern_start = vim.loop.hrtime()
-    local matches, is_exclusion = utils.expand_glob_pattern(root_path, pattern)
+    local matches, is_exclusion = pnpm_utils.expand_glob_pattern(root_path, pattern)
+    local pattern_end = vim.loop.hrtime()
 
-    if M.config and M.config.debug then
-      local pattern_end = vim.loop.hrtime()
-      utils.debug(
-        string.format(
-          "Pattern '%s' expansion took %.2fms, found %d matches",
-          pattern,
-          (pattern_end - pattern_start) / 1000000,
-          #matches
-        )
+    pnpm_utils.debug(
+      string.format(
+        "Pattern '%s' expansion took %.2fms, found %d matches",
+        pattern,
+        (pattern_end - pattern_start) / 1000000,
+        #matches
       )
-    end
+    )
 
     if is_exclusion then
       -- Store exclusion patterns for later filtering.
@@ -825,11 +818,11 @@ function M._get_pnpm_packages(root_path)
       -- Add matching packages.
       for _, match in ipairs(matches) do
         -- Read package.json to get package name and details.
-        local package_json_path = utils.path_join(match.path, "package.json")
-        local package_content = fs.read_file(package_json_path)
+        local package_json_path = pnpm_utils.path_join(match.path, "package.json")
+        local package_content = pnpm_utils.fs.read_file(package_json_path)
 
         if package_content then
-          local package_data, json_error = utils.parse_json(package_content)
+          local package_data, json_error = pnpm_utils.parse_json(package_content)
           if package_data and package_data.name then
             table.insert(packages, {
               name = package_data.name,
@@ -842,14 +835,12 @@ function M._get_pnpm_packages(root_path)
               dependencies = M._get_js_dependencies(package_data),
             })
           else
-            if M.config and M.config.debug then
-              utils.debug(
-                "Failed to parse package.json in "
-                  .. match.path
-                  .. ": "
-                  .. (json_error or "unknown error")
-              )
-            end
+            pnpm_utils.debug(
+              "Failed to parse package.json in "
+                .. match.path
+                .. ": "
+                .. (json_error or "unknown error")
+            )
           end
         end
       end
@@ -863,7 +854,7 @@ function M._get_pnpm_packages(root_path)
     for _, pkg in ipairs(packages) do
       local excluded = false
       for _, exclusion_pattern in ipairs(exclusions) do
-        if utils.glob_match(exclusion_pattern, pkg.relative_path) then
+        if pnpm_utils.glob_match(exclusion_pattern, pkg.relative_path) then
           excluded = true
           break
         end
@@ -873,28 +864,20 @@ function M._get_pnpm_packages(root_path)
       end
     end
     packages = filtered_packages
-
-    if M.config and M.config.debug then
-      local exclusion_end = vim.loop.hrtime()
-      utils.debug(
-        string.format(
-          "Exclusion filtering took %.2fms",
-          (exclusion_end - exclusion_start) / 1000000
-        )
-      )
-    end
-  end
-
-  if M.config and M.config.debug then
-    local total_time = vim.loop.hrtime()
-    utils.debug(
-      string.format(
-        "PNPM package discovery completed in %.2fms, found %d packages",
-        (total_time - start_time) / 1000000,
-        #packages
-      )
+    local exclusion_end = vim.loop.hrtime()
+    pnpm_utils.debug(
+      string.format("Exclusion filtering took %.2fms", (exclusion_end - exclusion_start) / 1000000)
     )
   end
+
+  local total_time = vim.loop.hrtime()
+  pnpm_utils.debug(
+    string.format(
+      "PNPM package discovery completed in %.2fms, found %d packages",
+      (total_time - start_time) / 1000000,
+      #packages
+    )
+  )
 
   return packages
 end
