@@ -1,10 +1,10 @@
 -- Test cache performance and concurrency
-vim.opt.runtimepath:prepend('/home/sqve/code/personal/monava.nvim')
-package.path = package.path .. ';/home/sqve/code/personal/monava.nvim/lua/?.lua'
-package.path = package.path .. ';/home/sqve/code/personal/monava.nvim/lua/?/init.lua'
+vim.opt.runtimepath:prepend("/home/sqve/code/personal/monava.nvim")
+package.path = package.path .. ";/home/sqve/code/personal/monava.nvim/lua/?.lua"
+package.path = package.path .. ";/home/sqve/code/personal/monava.nvim/lua/?/init.lua"
 
-local monava = require('monava')
-local cache = require('monava.utils.cache')
+local cache = require("monava.utils.cache")
+local monava = require("monava")
 
 print("=== Testing Cache Performance & Concurrency ===")
 
@@ -47,14 +47,14 @@ print("Rapid operations completed in", duration, "ms: PASS")
 -- Test 5: File-based invalidation
 print("\n5. Testing file-based cache invalidation...")
 local test_file = "/tmp/test_cache_file.txt"
-vim.fn.writefile({"test content"}, test_file)
+vim.fn.writefile({ "test content" }, test_file)
 cache.set_with_file_invalidation("file_key", "file_value", test_file, 300)
 local file_value1 = cache.get_with_file_invalidation("file_key", test_file)
 print("File-based cache get:", file_value1 == "file_value" and "PASS" or "FAIL")
 
 -- Modify file and test invalidation
 vim.wait(1) -- Ensure different mtime
-vim.fn.writefile({"modified content"}, test_file)
+vim.fn.writefile({ "modified content" }, test_file)
 local file_value2 = cache.get_with_file_invalidation("file_key", test_file)
 print("File-based cache invalidation:", file_value2 == nil and "PASS" or "FAIL")
 
@@ -74,7 +74,9 @@ monava.setup({ debug = false, cache = { enabled = true, ttl = 300 } })
 -- Test rapid package requests (should use cache after first call)
 local start_time2 = vim.loop.hrtime()
 for i = 1, 5 do
-  pcall(function() monava.show_package_picker() end) -- Will call get_cached_packages internally
+  pcall(function()
+    monava.show_package_picker()
+  end) -- Will call get_cached_packages internally
 end
 local end_time2 = vim.loop.hrtime()
 local duration2 = (end_time2 - start_time2) / 1000000

@@ -1,21 +1,21 @@
 -- Non-interactive comprehensive testing
-vim.opt.runtimepath:prepend('/home/sqve/code/personal/monava.nvim')
-package.path = package.path .. ';/home/sqve/code/personal/monava.nvim/lua/?.lua'
-package.path = package.path .. ';/home/sqve/code/personal/monava.nvim/lua/?/init.lua'
+vim.opt.runtimepath:prepend("/home/sqve/code/personal/monava.nvim")
+package.path = package.path .. ";/home/sqve/code/personal/monava.nvim/lua/?.lua"
+package.path = package.path .. ";/home/sqve/code/personal/monava.nvim/lua/?/init.lua"
 
-local monava = require('monava')
-local core = require('monava.core')
-local adapters = require('monava.adapters')
-local cache = require('monava.utils.cache')
+local adapters = require("monava.adapters")
+local cache = require("monava.utils.cache")
+local core = require("monava.core")
+local monava = require("monava")
 
 print("=== Comprehensive Non-Interactive Testing ===")
 
 -- Test 1: Plugin initialization
 print("\n1. Plugin Initialization Test")
-local init_success = monava.setup({ 
-  debug = false, 
+local init_success = monava.setup({
+  debug = false,
   cache = { enabled = true, ttl = 300 },
-  picker_priority = { 'fallback' }
+  picker_priority = { "fallback" },
 })
 print("✅ Plugin initialization:", init_success and "PASS" or "FAIL")
 
@@ -30,10 +30,33 @@ print("✅ Root directory:", info.root or "unknown")
 -- Test 3: Input validation tests
 print("\n3. Input Validation Tests")
 local validation_tests = {
-  { fn = function() return monava.setup("invalid") end, desc = "Invalid setup type" },
-  { fn = function() monava.files(""); return true end, desc = "Empty package name" },
-  { fn = function() monava.files(123); return true end, desc = "Invalid package type" },
-  { fn = function() monava.dependencies(""); return true end, desc = "Empty dependency package" },
+  {
+    fn = function()
+      return monava.setup("invalid")
+    end,
+    desc = "Invalid setup type",
+  },
+  {
+    fn = function()
+      monava.files("")
+      return true
+    end,
+    desc = "Empty package name",
+  },
+  {
+    fn = function()
+      monava.files(123)
+      return true
+    end,
+    desc = "Invalid package type",
+  },
+  {
+    fn = function()
+      monava.dependencies("")
+      return true
+    end,
+    desc = "Empty dependency package",
+  },
 }
 
 for _, test in ipairs(validation_tests) do
@@ -62,7 +85,7 @@ print("✅ Cache statistics:", stats.total_entries >= 0 and "AVAILABLE" or "UNAV
 
 -- Test 5: Adapter system
 print("\n5. Adapter System Tests")
-adapters.init({ picker_priority = { 'fallback' } })
+adapters.init({ picker_priority = { "fallback" } })
 local available_pickers = adapters.get_available_pickers()
 print("✅ Available pickers:", #available_pickers, "found")
 print("✅ Fallback system:", #available_pickers == 0 and "WORKING" or "NOT_NEEDED")
@@ -70,9 +93,24 @@ print("✅ Fallback system:", #available_pickers == 0 and "WORKING" or "NOT_NEED
 -- Test 6: Error recovery
 print("\n6. Error Recovery Tests")
 local error_tests = {
-  { fn = function() return core.get_package_info("nonexistent") end, desc = "Nonexistent package" },
-  { fn = function() return core.get_dependencies("nonexistent") end, desc = "Nonexistent dependencies" },
-  { fn = function() return core.get_current_package() end, desc = "Current package detection" },
+  {
+    fn = function()
+      return core.get_package_info("nonexistent")
+    end,
+    desc = "Nonexistent package",
+  },
+  {
+    fn = function()
+      return core.get_dependencies("nonexistent")
+    end,
+    desc = "Nonexistent dependencies",
+  },
+  {
+    fn = function()
+      return core.get_current_package()
+    end,
+    desc = "Current package detection",
+  },
 }
 
 for _, test in ipairs(error_tests) do
@@ -94,7 +132,10 @@ if #info.packages > 0 then
   local has_name = pkg.name and pkg.name ~= ""
   local has_path = pkg.path and pkg.path ~= ""
   local has_type = pkg.type and pkg.type ~= ""
-  print("✅ Package structure validation:", has_name and has_path and has_type and "PASS" or "FAIL")
+  print(
+    "✅ Package structure validation:",
+    has_name and has_path and has_type and "PASS" or "FAIL"
+  )
   print("   - Name:", pkg.name or "missing")
   print("   - Path:", pkg.path or "missing")
   print("   - Type:", pkg.type or "missing")
@@ -104,12 +145,14 @@ end
 
 -- Test 9: Health check
 print("\n9. Health Check Test")
-local health_success = pcall(function() monava.health() end)
+local health_success = pcall(function()
+  monava.health()
+end)
 print("✅ Health check execution:", health_success and "PASS" or "FAIL")
 
 print("\n=== Testing Summary ===")
 print("✅ All critical functionality validated")
-print("✅ Error handling working correctly") 
+print("✅ Error handling working correctly")
 print("✅ Input validation preventing crashes")
 print("✅ Cache system functioning properly")
 print("✅ Adapter fallback chain operational")

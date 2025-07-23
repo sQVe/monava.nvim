@@ -1,9 +1,9 @@
 -- Test error scenarios and edge cases
-vim.opt.runtimepath:prepend('/home/sqve/code/personal/monava.nvim')
-package.path = package.path .. ';/home/sqve/code/personal/monava.nvim/lua/?.lua'
-package.path = package.path .. ';/home/sqve/code/personal/monava.nvim/lua/?/init.lua'
+vim.opt.runtimepath:prepend("/home/sqve/code/personal/monava.nvim")
+package.path = package.path .. ";/home/sqve/code/personal/monava.nvim/lua/?.lua"
+package.path = package.path .. ";/home/sqve/code/personal/monava.nvim/lua/?/init.lua"
 
-local monava = require('monava')
+local monava = require("monava")
 
 print("=== Testing Error Scenarios ===")
 
@@ -21,19 +21,19 @@ print("Valid setup:", result2 and "PASS" or "FAIL")
 print("\n3. Testing invalid package names...")
 -- This should trigger input validation
 pcall(function()
-  monava.files("")  -- Empty string
+  monava.files("") -- Empty string
   print("Empty package name handled gracefully: PASS")
 end)
 
 pcall(function()
-  monava.files(123)  -- Number instead of string
+  monava.files(123) -- Number instead of string
   print("Invalid package name type handled gracefully: PASS")
 end)
 
 -- Test 4: Test dependencies with invalid input
 print("\n4. Testing dependencies with invalid input...")
 pcall(function()
-  monava.dependencies(nil)  -- Should auto-detect and handle gracefully
+  monava.dependencies(nil) -- Should auto-detect and handle gracefully
   print("Dependencies with nil handled gracefully: PASS")
 end)
 
