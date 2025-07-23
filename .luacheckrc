@@ -41,6 +41,7 @@ files = {
 -- Exclude patterns
 exclude_files = {
     "tests/minimal_init.lua",
+    "tests/fixtures/",
 }
 
 -- Per-file overrides
