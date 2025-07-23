@@ -6,7 +6,6 @@ local cache = require("monava.utils.cache")
 local fs = require("monava.utils.fs")
 local utils = require("monava.utils")
 
--- Module state.
 M.config = {}
 M.detected_type = nil
 M.root_path = nil
@@ -47,13 +46,13 @@ local detectors = {
         local has_data = data ~= nil
         local is_workspace = has_data and (data.workspaces or data.private)
         if is_workspace then
-          -- Distinguish between Yarn and npm based on lock files.
+          -- Package manager detection affects workspace discovery strategy.
           if fs.exists(root_path .. "/yarn.lock") then
             return true, "yarn_workspaces"
           elseif fs.exists(root_path .. "/package-lock.json") then
             return true, "npm_workspaces"
           else
-            -- Default to npm if no lock file.
+            -- Assume npm workspaces when no lock file indicates specific manager.
             return true, "npm_workspaces"
           end
         end
@@ -208,7 +207,7 @@ function M._set_no_monorepo_detected(cwd)
   M.root_path = cwd
 end
 
--- Get all packages in the monorepo.
+-- Get all packages in the monorepo with optimized caching.
 function M.get_packages()
   -- Validate core state.
   if not M.detected_type then
@@ -223,11 +222,11 @@ function M.get_packages()
     return {}
   end
 
-  local cache_key = "packages:" .. M.root_path
+  local cache_key = "packages:" .. M.root_path .. ":" .. (M.subtype or "")
 
-  -- Check cache first.
+  -- Check cache first with better key generation.
   local cached = M.cache and M.cache.get(cache_key)
-  if cached then
+  if cached and type(cached) == "table" and #cached > 0 then
     return cached
   end
 
@@ -240,17 +239,36 @@ function M.get_packages()
     return {}
   end
 
+  -- Measure package discovery performance
+  local start_time = vim.loop.hrtime()
   local packages = detector.get_packages(M.root_path, M.subtype)
 
-  -- Cache the result with file-based invalidation.
-  local config_file = M._get_main_config_file()
-  if config_file then
-    M.cache.set_with_file_invalidation(cache_key, packages, config_file, 600) -- 10 minute cache
-  else
-    M.cache.set(cache_key, packages, 300) -- 5 minute cache
+  if M.config and M.config.debug then
+    local end_time = vim.loop.hrtime()
+    local duration_ms = (end_time - start_time) / 1000000
+    vim.notify(
+      string.format(
+        "[monava] Package discovery took %.2fms, found %d packages",
+        duration_ms,
+        packages and #packages or 0
+      ),
+      vim.log.levels.DEBUG
+    )
   end
 
-  return packages
+  -- Only cache valid non-empty results
+  if packages and type(packages) == "table" and #packages > 0 then
+    local config_file = M._get_main_config_file()
+    local cache_ttl = config_file and 600 or 300 -- 10min with config file, 5min without
+
+    if config_file then
+      M.cache.set_with_file_invalidation(cache_key, packages, config_file, cache_ttl)
+    else
+      M.cache.set(cache_key, packages, cache_ttl)
+    end
+  end
+
+  return packages or {}
 end
 
 -- Get current package based on file location.
@@ -777,7 +795,7 @@ function M._get_pnpm_packages(root_path)
     return {}
   end
 
-  -- Read and parse the workspace file.
+  -- Read and parse the workspace file with error handling.
   local content = fs.read_file(workspace_file)
   if not content then
     utils.warn("Failed to read pnpm-workspace.yaml")
@@ -785,103 +803,71 @@ function M._get_pnpm_packages(root_path)
   end
 
   local workspace_config, parse_error = utils.parse_pnpm_workspace_yaml(content)
-  if not workspace_config then
+  if not workspace_config or not workspace_config.packages then
     utils.warn("Failed to parse pnpm-workspace.yaml: " .. (parse_error or "unknown error"))
     return {}
   end
 
-  if M.config and M.config.debug then
-    local parse_time = vim.loop.hrtime()
-    utils.debug(
-      string.format("PNPM workspace parsing took %.2fms", (parse_time - start_time) / 1000000)
-    )
+  -- Separate exclusions from includes for better performance
+  local include_patterns = {}
+  local exclude_patterns = {}
+
+  for _, pattern in ipairs(workspace_config.packages) do
+    if pattern:match("^!") then
+      table.insert(exclude_patterns, pattern:gsub("^!", ""))
+    else
+      table.insert(include_patterns, pattern)
+    end
   end
 
   local packages = {}
-  local exclusions = {}
+  local seen_paths = {} -- Deduplicate packages
 
-  -- Process each pattern in the workspace config.
-  for _, pattern in ipairs(workspace_config.packages) do
-    local pattern_start = vim.loop.hrtime()
-    local matches, is_exclusion = utils.expand_glob_pattern(root_path, pattern)
+  -- Process include patterns
+  for _, pattern in ipairs(include_patterns) do
+    local matches = utils.expand_glob_pattern(root_path, pattern)
 
-    if M.config and M.config.debug then
-      local pattern_end = vim.loop.hrtime()
-      utils.debug(
-        string.format(
-          "Pattern '%s' expansion took %.2fms, found %d matches",
-          pattern,
-          (pattern_end - pattern_start) / 1000000,
-          #matches
-        )
-      )
-    end
-
-    if is_exclusion then
-      -- Store exclusion patterns for later filtering.
-      local clean_pattern = pattern:gsub("^!", "")
-      table.insert(exclusions, clean_pattern)
-    else
-      -- Add matching packages.
-      for _, match in ipairs(matches) do
-        -- Read package.json to get package name and details.
-        local package_json_path = utils.path_join(match.path, "package.json")
-        local package_content = fs.read_file(package_json_path)
-
-        if package_content then
-          local package_data, json_error = utils.parse_json(package_content)
-          if package_data and package_data.name then
-            table.insert(packages, {
-              name = package_data.name,
-              path = match.path,
-              relative_path = match.relative_path,
-              version = package_data.version or "0.0.0",
-              description = package_data.description or "",
-              private = package_data.private == true,
-              scripts = package_data.scripts or {},
-              dependencies = M._get_js_dependencies(package_data),
-            })
-          else
-            if M.config and M.config.debug then
-              utils.debug(
-                "Failed to parse package.json in "
-                  .. match.path
-                  .. ": "
-                  .. (json_error or "unknown error")
-              )
-            end
-          end
-        end
+    for _, match in ipairs(matches) do
+      -- Skip if already processed
+      if seen_paths[match.path] then
+        goto continue
       end
-    end
-  end
+      seen_paths[match.path] = true
 
-  -- Filter out excluded packages.
-  if #exclusions > 0 then
-    local exclusion_start = vim.loop.hrtime()
-    local filtered_packages = {}
-    for _, pkg in ipairs(packages) do
+      -- Check exclusions early
       local excluded = false
-      for _, exclusion_pattern in ipairs(exclusions) do
-        if utils.glob_match(exclusion_pattern, pkg.relative_path) then
+      for _, exclusion_pattern in ipairs(exclude_patterns) do
+        if utils.glob_match(exclusion_pattern, match.relative_path) then
           excluded = true
           break
         end
       end
-      if not excluded then
-        table.insert(filtered_packages, pkg)
-      end
-    end
-    packages = filtered_packages
 
-    if M.config and M.config.debug then
-      local exclusion_end = vim.loop.hrtime()
-      utils.debug(
-        string.format(
-          "Exclusion filtering took %.2fms",
-          (exclusion_end - exclusion_start) / 1000000
-        )
-      )
+      if not excluded then
+        local package_json_path = utils.path_join(match.path, "package.json")
+        local package_content = fs.read_file(package_json_path)
+
+        if package_content then
+          local package_data, json_error = utils.parse_json(package_content, 512 * 1024) -- 512KB limit
+          if package_data and package_data.name then
+            table.insert(packages, {
+              name = package_data.name,
+              path = match.path,
+              type = "pnpm-package",
+              config_file = package_json_path,
+            })
+          elseif M.config and M.config.debug then
+            utils.debug(
+              "Failed to parse package.json in "
+                .. match.path
+                .. ": "
+                .. (json_error or "unknown error")
+            )
+          end
+        end
+      end
+
+      ::continue::
     end
   end
 

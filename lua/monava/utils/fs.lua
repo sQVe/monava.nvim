@@ -9,19 +9,17 @@ local function validate_path(path)
     return nil, "Invalid path: must be a non-empty string"
   end
 
-  -- Convert to absolute path
   local abs_path = vim.fn.fnamemodify(path, ":p")
   if not abs_path or abs_path == "" then
     return nil, "Invalid path: cannot resolve to absolute path"
   end
 
-  -- Remove trailing slashes for consistency
   abs_path = abs_path:gsub("/$", "")
 
   -- Basic workspace boundary check - ensure we're in current working directory tree
   local cwd = vim.fn.getcwd():gsub("/$", "")
   if not (abs_path == cwd or abs_path:sub(1, #cwd + 1) == cwd .. "/") then
-    -- Allow temp directories for testing
+    -- Testing requires access to temp directories.
     local temp_paths = { "/tmp", vim.fn.stdpath("cache") }
     local in_temp = false
     for _, temp in ipairs(temp_paths) do
@@ -148,12 +146,10 @@ function M.scandir(path, opts)
       break
     end
 
-    -- Skip hidden files unless requested
     if not opts.include_hidden and name:sub(1, 1) == "." then
       goto continue
     end
 
-    -- Filter by type if specified
     if opts.type and type ~= opts.type then
       goto continue
     end
@@ -173,8 +169,8 @@ end
 -- Find files matching patterns with bounds checking and limits
 function M.find_files(root, patterns, opts)
   opts = opts or {}
-  local max_depth = math.min(opts.max_depth or 10, 20) -- Cap at 20 levels
-  local max_results = opts.max_results or 10000 -- Prevent memory issues
+  local max_depth = math.min(opts.max_depth or 10, 20)
+  local max_results = opts.max_results or 10000
   local exclude_patterns = opts.exclude_patterns or {}
   local results = {}
   local file_count = 0
@@ -258,7 +254,6 @@ function M.find_packages(root, indicator_files, opts)
       return
     end
 
-    -- Check if current directory contains any indicator files
     local found_indicators = {}
     for _, file in ipairs(indicator_files) do
       local file_path = dir .. "/" .. file
@@ -275,7 +270,6 @@ function M.find_packages(root, indicator_files, opts)
       })
     end
 
-    -- Continue searching subdirectories
     local entries = M.scandir(dir, { type = "directory" })
     for _, entry in ipairs(entries) do
       if not should_exclude(entry.path) then
@@ -314,15 +308,13 @@ end
 function M.relative_path(target, base)
   base = base or vim.fn.getcwd()
 
-  -- Normalize paths
   target = vim.fn.resolve(target)
   base = vim.fn.resolve(base)
 
-  -- Use vim's built-in function if available
+  -- Prefer built-in implementation when available.
   if vim.fn.has("nvim-0.8.0") == 1 then
     return vim.fn.fnamemodify(target, ":~:.")
   else
-    -- Fallback implementation
     if target:sub(1, #base) == base then
       local relative = target:sub(#base + 1)
       if relative:sub(1, 1) == "/" then

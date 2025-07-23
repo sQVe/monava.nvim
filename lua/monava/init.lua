@@ -3,22 +3,21 @@
 
 local M = {}
 
--- Plugin state.
 local adapters = require("monava.adapters")
 local config = require("monava.config")
 local core = require("monava.core")
+local utils = require("monava.utils")
 
 -- Default configuration.
 M._config = {}
 M._initialized = false
-M._packages_cache = nil -- Module-level package cache
+M._packages_cache = nil
 M._packages_cache_timestamp = 0
 
 -- Setup function called by users with comprehensive error handling.
 function M.setup(opts)
   -- Validate input parameters
-  if opts ~= nil and type(opts) ~= "table" then
-    vim.notify("[monava] Setup options must be a table or nil", vim.log.levels.ERROR)
+  if not utils.validate_input(opts, "table", "setup options", true) then
     return false
   end
 
@@ -92,7 +91,7 @@ end
 
 -- Get packages with module-level caching (5-second cache)
 local function get_cached_packages()
-  local current_time = vim.loop.hrtime() / 1000000 -- Convert to milliseconds
+  local current_time = vim.loop.hrtime() / 1000000
   local cache_ttl = 5000 -- 5 seconds
 
   -- Check if cache is valid
@@ -131,11 +130,8 @@ function M.show_package_picker()
   end
 
   -- Validate packages structure
-  for i, pkg in ipairs(packages) do
-    if type(pkg) ~= "table" or not pkg.name or not pkg.path then
-      vim.notify("[monava] Invalid package structure at index " .. i, vim.log.levels.ERROR)
-      return
-    end
+  if not utils.validate_package_structure(packages, "show_package_picker") then
+    return
   end
 
   adapters.show_packages(packages)
@@ -152,11 +148,8 @@ function M.switch()
   end
 
   -- Validate packages structure
-  for i, pkg in ipairs(packages) do
-    if type(pkg) ~= "table" or not pkg.name or not pkg.path then
-      vim.notify("[monava] Invalid package structure at index " .. i, vim.log.levels.ERROR)
-      return
-    end
+  if not utils.validate_package_structure(packages, "switch") then
+    return
   end
 
   adapters.switch_package(packages)
@@ -167,8 +160,7 @@ function M.files(package_name)
   ensure_initialized()
 
   -- Validate package_name if provided
-  if package_name and (type(package_name) ~= "string" or package_name == "") then
-    vim.notify("[monava] Package name must be a non-empty string", vim.log.levels.ERROR)
+  if package_name and not utils.validate_input(package_name, "string", "package_name") then
     return
   end
 
@@ -204,8 +196,7 @@ function M.dependencies(package_name)
   ensure_initialized()
 
   -- Validate package_name if provided
-  if package_name and (type(package_name) ~= "string" or package_name == "") then
-    vim.notify("[monava] Package name must be a non-empty string", vim.log.levels.ERROR)
+  if package_name and not utils.validate_input(package_name, "string", "package_name") then
     return
   end
 
@@ -227,11 +218,8 @@ function M.dependencies(package_name)
   end
 
   -- Validate dependencies structure
-  for i, dep in ipairs(deps) do
-    if type(dep) ~= "table" or not dep.name then
-      vim.notify("[monava] Invalid dependency structure at index " .. i, vim.log.levels.ERROR)
-      return
-    end
+  if not utils.validate_package_structure(deps, "dependencies") then
+    return
   end
 
   adapters.show_dependencies(package_name, deps)

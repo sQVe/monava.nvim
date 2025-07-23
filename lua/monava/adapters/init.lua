@@ -3,7 +3,6 @@
 
 local M = {}
 
--- Available picker adapters
 M.available_pickers = {}
 M.active_picker = nil
 M.config = {}
@@ -83,185 +82,111 @@ function M.set_active_picker(picker_name)
   return false
 end
 
--- Try a picker operation with error handling
+-- Picker operation registry for cleaner dispatch
+local operation_registry = {
+  telescope = {
+    show_packages = "M._telescope_show_packages",
+    switch_package = "M._telescope_switch_package",
+    find_files = "M._telescope_find_files",
+    show_dependencies = "M._telescope_show_dependencies",
+  },
+  ["fzf-lua"] = {
+    show_packages = "M._fzf_show_packages",
+    switch_package = "M._fzf_switch_package",
+    find_files = "M._fzf_find_files",
+    show_dependencies = "M._fzf_show_dependencies",
+  },
+  snacks = {
+    show_packages = "M._snacks_show_packages",
+    switch_package = "M._snacks_switch_package",
+    find_files = "M._snacks_find_files",
+    show_dependencies = "M._snacks_show_dependencies",
+  },
+}
+
+-- Try a picker operation with simplified dispatch
 function M._try_picker_operation(picker_name, operation, ...)
   if not vim.tbl_contains(M.available_pickers, picker_name) then
     return false
   end
 
-  local args = { ... }
-  local success = false
-
-  if picker_name == "telescope" then
-    if operation == "show_packages" then
-      success = pcall(M._telescope_show_packages, args[1], args[2])
-    elseif operation == "switch_package" then
-      success = pcall(M._telescope_switch_package, args[1], args[2])
-    elseif operation == "find_files" then
-      success = pcall(M._telescope_find_files, args[1], args[2])
-    elseif operation == "show_dependencies" then
-      success = pcall(M._telescope_show_dependencies, args[1], args[2], args[3])
-    end
-  elseif picker_name == "fzf-lua" then
-    if operation == "show_packages" then
-      success = pcall(M._fzf_show_packages, args[1], args[2])
-    elseif operation == "switch_package" then
-      success = pcall(M._fzf_switch_package, args[1], args[2])
-    elseif operation == "find_files" then
-      success = pcall(M._fzf_find_files, args[1], args[2])
-    elseif operation == "show_dependencies" then
-      success = pcall(M._fzf_show_dependencies, args[1], args[2], args[3])
-    end
-  elseif picker_name == "snacks" then
-    if operation == "show_packages" then
-      success = pcall(M._snacks_show_packages, args[1], args[2])
-    elseif operation == "switch_package" then
-      success = pcall(M._snacks_switch_package, args[1], args[2])
-    elseif operation == "find_files" then
-      success = pcall(M._snacks_find_files, args[1], args[2])
-    elseif operation == "show_dependencies" then
-      success = pcall(M._snacks_show_dependencies, args[1], args[2], args[3])
-    end
+  local picker_ops = operation_registry[picker_name]
+  if not picker_ops or not picker_ops[operation] then
+    return false
   end
 
+  local func_map = {
+    ["M._telescope_show_packages"] = M._telescope_show_packages,
+    ["M._telescope_switch_package"] = M._telescope_switch_package,
+    ["M._telescope_find_files"] = M._telescope_find_files,
+    ["M._telescope_show_dependencies"] = M._telescope_show_dependencies,
+    ["M._fzf_show_packages"] = M._fzf_show_packages,
+    ["M._fzf_switch_package"] = M._fzf_switch_package,
+    ["M._fzf_find_files"] = M._fzf_find_files,
+    ["M._fzf_show_dependencies"] = M._fzf_show_dependencies,
+    ["M._snacks_show_packages"] = M._snacks_show_packages,
+    ["M._snacks_switch_package"] = M._snacks_switch_package,
+    ["M._snacks_find_files"] = M._snacks_find_files,
+    ["M._snacks_show_dependencies"] = M._snacks_show_dependencies,
+  }
+
+  local func = func_map[picker_ops[operation]]
+  if not func then
+    return false
+  end
+
+  local success = pcall(func, ...)
   return success
+end
+
+-- Generic picker operation with fallback chain
+function M._execute_with_fallback(operation, fallback_func, ...)
+  if not M.active_picker then
+    fallback_func(...)
+    return
+  end
+
+  local picker_config = M.config.pickers and M.config.pickers[M.active_picker] or {}
+  local success = M._try_picker_operation(M.active_picker, operation, ..., picker_config)
+
+  if not success then
+    -- Try other available pickers as fallback
+    for _, picker_name in ipairs(M.available_pickers) do
+      if picker_name ~= M.active_picker then
+        local fallback_config = M.config.pickers and M.config.pickers[picker_name] or {}
+        success = M._try_picker_operation(picker_name, operation, ..., fallback_config)
+        if success then
+          if M.config.debug then
+            vim.notify("[monava] Fell back to " .. picker_name .. " picker", vim.log.levels.INFO)
+          end
+          return
+        end
+      end
+    end
+
+    -- Final fallback to built-in implementation
+    fallback_func(...)
+  end
 end
 
 -- Show packages using active picker with fallback chain
 function M.show_packages(packages)
-  if not M.active_picker then
-    M._fallback_show_packages(packages)
-    return
-  end
-
-  local picker_config = M.config.pickers and M.config.pickers[M.active_picker] or {}
-
-  -- Try the active picker first
-  local success = M._try_picker_operation(M.active_picker, "show_packages", packages, picker_config)
-
-  if not success then
-    -- Try other available pickers as fallback
-    for _, picker_name in ipairs(M.available_pickers) do
-      if picker_name ~= M.active_picker then
-        local fallback_config = M.config.pickers and M.config.pickers[picker_name] or {}
-        success = M._try_picker_operation(picker_name, "show_packages", packages, fallback_config)
-        if success then
-          vim.notify("[monava] Fell back to " .. picker_name .. " picker", vim.log.levels.INFO)
-          break
-        end
-      end
-    end
-
-    -- Final fallback to built-in implementation
-    if not success then
-      M._fallback_show_packages(packages)
-    end
-  end
+  M._execute_with_fallback("show_packages", M._fallback_show_packages, packages)
 end
 
 -- Switch package using active picker with fallback chain
 function M.switch_package(packages)
-  if not M.active_picker then
-    M._fallback_switch_package(packages)
-    return
-  end
-
-  local picker_config = M.config.pickers and M.config.pickers[M.active_picker] or {}
-
-  -- Try the active picker first
-  local success =
-    M._try_picker_operation(M.active_picker, "switch_package", packages, picker_config)
-
-  if not success then
-    -- Try other available pickers as fallback
-    for _, picker_name in ipairs(M.available_pickers) do
-      if picker_name ~= M.active_picker then
-        local fallback_config = M.config.pickers and M.config.pickers[picker_name] or {}
-        success = M._try_picker_operation(picker_name, "switch_package", packages, fallback_config)
-        if success then
-          vim.notify("[monava] Fell back to " .. picker_name .. " picker", vim.log.levels.INFO)
-          break
-        end
-      end
-    end
-
-    -- Final fallback to built-in implementation
-    if not success then
-      M._fallback_switch_package(packages)
-    end
-  end
+  M._execute_with_fallback("switch_package", M._fallback_switch_package, packages)
 end
 
 -- Find files in package using active picker with fallback chain
 function M.find_files(package_info)
-  if not M.active_picker then
-    M._fallback_find_files(package_info)
-    return
-  end
-
-  local picker_config = M.config.pickers and M.config.pickers[M.active_picker] or {}
-
-  -- Try the active picker first
-  local success =
-    M._try_picker_operation(M.active_picker, "find_files", package_info, picker_config)
-
-  if not success then
-    -- Try other available pickers as fallback
-    for _, picker_name in ipairs(M.available_pickers) do
-      if picker_name ~= M.active_picker then
-        local fallback_config = M.config.pickers and M.config.pickers[picker_name] or {}
-        success = M._try_picker_operation(picker_name, "find_files", package_info, fallback_config)
-        if success then
-          vim.notify("[monava] Fell back to " .. picker_name .. " picker", vim.log.levels.INFO)
-          break
-        end
-      end
-    end
-
-    -- Final fallback to built-in implementation
-    if not success then
-      M._fallback_find_files(package_info)
-    end
-  end
+  M._execute_with_fallback("find_files", M._fallback_find_files, package_info)
 end
 
 -- Show dependencies using active picker with fallback chain
 function M.show_dependencies(package_name, deps)
-  if not M.active_picker then
-    M._fallback_show_dependencies(package_name, deps)
-    return
-  end
-
-  local picker_config = M.config.pickers and M.config.pickers[M.active_picker] or {}
-
-  -- Try the active picker first
-  local success =
-    M._try_picker_operation(M.active_picker, "show_dependencies", package_name, deps, picker_config)
-
-  if not success then
-    -- Try other available pickers as fallback
-    for _, picker_name in ipairs(M.available_pickers) do
-      if picker_name ~= M.active_picker then
-        local fallback_config = M.config.pickers and M.config.pickers[picker_name] or {}
-        success = M._try_picker_operation(
-          picker_name,
-          "show_dependencies",
-          package_name,
-          deps,
-          fallback_config
-        )
-        if success then
-          vim.notify("[monava] Fell back to " .. picker_name .. " picker", vim.log.levels.INFO)
-          break
-        end
-      end
-    end
-
-    -- Final fallback to built-in implementation
-    if not success then
-      M._fallback_show_dependencies(package_name, deps)
-    end
-  end
+  M._execute_with_fallback("show_dependencies", M._fallback_show_dependencies, package_name, deps)
 end
 
 -- Telescope implementations
@@ -307,7 +232,7 @@ function M._telescope_show_packages(packages, config)
 end
 
 function M._telescope_switch_package(packages, config)
-  M._telescope_show_packages(packages, config) -- Same implementation
+  M._telescope_show_packages(packages, config)
 end
 
 function M._telescope_find_files(package_info, config)
@@ -384,7 +309,7 @@ function M._fzf_show_packages(packages, config)
 end
 
 function M._fzf_switch_package(packages, config)
-  M._fzf_show_packages(packages, config) -- Same implementation
+  M._fzf_show_packages(packages, config)
 end
 
 function M._fzf_find_files(package_info, config)
@@ -451,7 +376,7 @@ function M._snacks_show_packages(packages, config)
 end
 
 function M._snacks_switch_package(packages, config)
-  M._snacks_show_packages(packages, config) -- Same implementation
+  M._snacks_show_packages(packages, config)
 end
 
 function M._snacks_find_files(package_info, config)
@@ -515,7 +440,7 @@ function M._fallback_show_packages(packages)
 end
 
 function M._fallback_switch_package(packages)
-  M._fallback_show_packages(packages) -- Same implementation
+  M._fallback_show_packages(packages)
 end
 
 function M._fallback_find_files(package_info)

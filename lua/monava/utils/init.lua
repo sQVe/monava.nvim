@@ -7,7 +7,6 @@ local M = {}
 M.fs = require("monava.utils.fs")
 M.cache = require("monava.utils.cache")
 
--- String utilities.
 function M.starts_with(str, prefix)
   return str:sub(1, #prefix) == prefix
 end
@@ -20,7 +19,6 @@ function M.trim(str)
   return str:match("^%s*(.-)%s*$")
 end
 
--- Table utilities.
 function M.table_contains(table, value)
   for _, v in ipairs(table) do
     if v == value then
@@ -45,18 +43,17 @@ function M.table_keys(table)
   return keys
 end
 
--- Path utilities.
 function M.path_join(...)
   local parts = { ... }
   local path = table.concat(parts, "/")
-  -- Normalize path separators and remove duplicate slashes.
+  -- Ensure consistent path format for cross-platform compatibility.
   path = path:gsub("//+", "/")
   return path
 end
 
 function M.path_relative(path, base)
   base = base or vim.fn.getcwd()
-  -- Ensure both paths are absolute.
+  -- Path resolution requires absolute paths for reliable comparison.
   if not M.starts_with(path, "/") then
     path = M.path_join(base, path)
   end
@@ -64,7 +61,7 @@ function M.path_relative(path, base)
     base = vim.fn.fnamemodify(base, ":p")
   end
 
-  -- Remove trailing slashes.
+  -- Normalize for consistent path comparison.
   base = base:gsub("/$", "")
   path = path:gsub("/$", "")
 
@@ -96,7 +93,7 @@ function M.parse_json(content, max_size)
     return nil, "JSON content too large: " .. #content .. " bytes (max: " .. max_size .. ")"
   end
 
-  -- Basic validation. to prevent malformed JSON from causing issues.
+  -- Prevent malformed JSON from causing parser crashes.
   if not content:match("^%s*[{%[]") then
     return nil, "Invalid JSON: must start with { or ["
   end
@@ -116,7 +113,7 @@ function M.encode_json(data, max_depth)
 
   max_depth = max_depth or 50
 
-  -- Simple depth check to prevent infinite recursion.
+  -- Prevent stack overflow from circular references.
   local function check_depth(obj, depth)
     if depth > max_depth then
       return false
@@ -143,24 +140,25 @@ function M.encode_json(data, max_depth)
   end
 end
 
--- Simple async utilities for basic operations.
+-- Improved async utilities with better resource management
 function M.run_async(cmd, callback, opts)
   opts = opts or {}
   local timeout = opts.timeout or 30000 -- 30 second default
+  local max_output_size = opts.max_output_size or 1024 * 1024 -- 1MB default
 
-  -- Basic validation
-  if type(cmd) ~= "table" or #cmd == 0 then
+  -- Enhanced validation
+  if not M.validate_input(cmd, "table", "command") or #cmd == 0 then
     if callback then
       callback(-1, "", "Invalid command: must be non-empty table")
     end
     return nil
   end
 
-  if type(callback) ~= "function" then
+  if not M.validate_input(callback, "function", "callback") then
     error("Callback must be a function")
   end
 
-  -- Basic argument validation (prevent accidents)
+  -- Sanitize and validate arguments
   for i, arg in ipairs(cmd) do
     if type(arg) ~= "string" and type(arg) ~= "number" then
       if callback then
@@ -182,32 +180,71 @@ function M.run_async(cmd, callback, opts)
 
   local stdout_data = {}
   local stderr_data = {}
+  local total_output_size = 0
 
+  -- Enhanced cleanup with error handling
   local function cleanup()
     if finished then
       return
     end
     finished = true
 
-    if timer then
-      timer:stop()
-      timer:close()
+    -- Stop timer safely
+    if timer and not timer:is_closing() then
+      pcall(function()
+        timer:stop()
+      end)
+      pcall(function()
+        timer:close()
+      end)
     end
 
+    -- Close pipes safely
     if stdout and not stdout:is_closing() then
-      stdout:close()
+      pcall(function()
+        stdout:read_stop()
+      end)
+      pcall(function()
+        stdout:close()
+      end)
     end
     if stderr and not stderr:is_closing() then
-      stderr:close()
+      pcall(function()
+        stderr:read_stop()
+      end)
+      pcall(function()
+        stderr:close()
+      end)
     end
+
+    -- Terminate process safely
     if handle and not handle:is_closing() then
-      handle:kill("sigterm")
-      handle:close()
+      pcall(function()
+        handle:kill("sigterm")
+      end)
+      -- Give it a moment, then force kill if needed
+      vim.defer_fn(function()
+        if handle and not handle:is_closing() then
+          pcall(function()
+            handle:kill("sigkill")
+          end)
+          pcall(function()
+            handle:close()
+          end)
+        end
+      end, 100)
     end
   end
 
-  -- Set up timeout
+  -- Set up timeout with better error handling
   timer = vim.loop.new_timer()
+  if not timer then
+    if callback then
+      callback(-1, "", "Failed to create timer")
+    end
+    return nil
+  end
+
   timer:start(timeout, 0, function()
     cleanup()
     vim.schedule(function()
@@ -215,40 +252,56 @@ function M.run_async(cmd, callback, opts)
     end)
   end)
 
-  -- Start the process
+  -- Start the process with better error handling
   handle = vim.loop.spawn(cmd[1], {
     args = vim.list_slice(cmd, 2),
     stdio = { nil, stdout, stderr },
   }, function(code, signal)
     cleanup()
     vim.schedule(function()
-      callback(code, table.concat(stdout_data), table.concat(stderr_data))
+      callback(code or -1, table.concat(stdout_data), table.concat(stderr_data))
     end)
   end)
 
   if not handle then
     cleanup()
     if callback then
-      callback(-1, "", "Failed to spawn command")
+      callback(-1, "", "Failed to spawn command: " .. cmd[1])
     end
     return nil
   end
 
-  -- Read from pipes
+  -- Read from pipes with size limits
   stdout:read_start(function(err, data)
-    if err then
+    if err or finished then
       return
     end
     if data then
+      total_output_size = total_output_size + #data
+      if total_output_size > max_output_size then
+        cleanup()
+        vim.schedule(function()
+          callback(-1, "", "Output size exceeded limit: " .. max_output_size .. " bytes")
+        end)
+        return
+      end
       table.insert(stdout_data, data)
     end
   end)
 
   stderr:read_start(function(err, data)
-    if err then
+    if err or finished then
       return
     end
     if data then
+      total_output_size = total_output_size + #data
+      if total_output_size > max_output_size then
+        cleanup()
+        vim.schedule(function()
+          callback(-1, "", "Output size exceeded limit: " .. max_output_size .. " bytes")
+        end)
+        return
+      end
       table.insert(stderr_data, data)
     end
   end)
@@ -256,6 +309,9 @@ function M.run_async(cmd, callback, opts)
   return {
     handle = handle,
     cancel = cleanup,
+    is_finished = function()
+      return finished
+    end,
   }
 end
 
@@ -453,6 +509,66 @@ function M.safe_call(func, ...)
     vim.notify("[monava] Error: " .. tostring(result), vim.log.levels.ERROR)
     return nil
   end
+end
+
+-- Standardized error handling for operations
+function M.handle_error(operation_name, error_msg, level)
+  level = level or vim.log.levels.ERROR
+  local formatted_msg = string.format("[monava] %s failed: %s", operation_name, tostring(error_msg))
+  vim.notify(formatted_msg, level)
+end
+
+-- Validation helper with consistent error reporting
+function M.validate_input(value, expected_type, name, allow_nil)
+  if allow_nil and value == nil then
+    return true
+  end
+
+  if value == nil then
+    M.handle_error("Input validation", name .. " cannot be nil")
+    return false
+  end
+
+  if type(value) ~= expected_type then
+    M.handle_error(
+      "Input validation",
+      string.format("%s must be %s, got %s", name, expected_type, type(value))
+    )
+    return false
+  end
+
+  if expected_type == "string" and value == "" then
+    M.handle_error("Input validation", name .. " cannot be empty string")
+    return false
+  end
+
+  return true
+end
+
+-- Package structure validation
+function M.validate_package_structure(packages, context)
+  context = context or "package validation"
+  if not packages or type(packages) ~= "table" then
+    M.handle_error(context, "packages must be a table")
+    return false
+  end
+
+  for i, pkg in ipairs(packages) do
+    if type(pkg) ~= "table" then
+      M.handle_error(context, "package at index " .. i .. " must be a table")
+      return false
+    end
+    if not pkg.name or not pkg.path then
+      M.handle_error(context, "package at index " .. i .. " missing name or path")
+      return false
+    end
+    if type(pkg.name) ~= "string" or type(pkg.path) ~= "string" then
+      M.handle_error(context, "package name and path must be strings")
+      return false
+    end
+  end
+
+  return true
 end
 
 -- Logging utilities

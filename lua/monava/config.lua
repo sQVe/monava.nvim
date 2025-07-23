@@ -5,7 +5,6 @@ local M = {}
 
 -- Default configuration.
 local default_config = {
-  -- Debug mode.
   debug = false,
 
   -- Picker preferences (in order of preference).
@@ -14,15 +13,13 @@ local default_config = {
   -- Cache settings.
   cache = {
     enabled = true,
-    ttl = 300, -- 5 minutes.
+    ttl = 300,
   },
 
   -- Detection settings.
   detection = {
-    -- Maximum depth to search for package files.
     max_depth = 3,
 
-    -- File patterns to look for in package detection.
     patterns = {
       javascript = {
         "package.json",
@@ -52,10 +49,8 @@ local default_config = {
 
   -- UI settings.
   ui = {
-    -- Default window size for info display.
     window_height = 20,
 
-    -- Icons for different package types (if available).
     icons = {
       javascript = "󰌞",
       typescript = "󰛦",
@@ -90,9 +85,7 @@ local default_config = {
     },
   },
 
-  -- Keymaps (can be disabled by setting to false).
   keymaps = {
-    -- Global keymaps.
     packages = "<leader>mp",
     switch = "<leader>ms",
     files = "<leader>mf",
@@ -102,13 +95,8 @@ local default_config = {
 
   -- Monorepo-specific settings.
   monorepo = {
-    -- Auto-detect current package based on file location.
     auto_detect_package = true,
-
-    -- Include hidden directories in package search.
     include_hidden = false,
-
-    -- Exclude patterns for package discovery.
     exclude_patterns = {
       "node_modules",
       ".git",
@@ -157,30 +145,111 @@ function M._should_merge_tables(source_value, target_value)
   return type(source_value) == "table" and type(target_value) == "table"
 end
 
--- Validate configuration.
+-- Enhanced configuration validation with detailed checks
 function M.validate_config(config)
   local issues = {}
+  local warnings = {}
 
-  -- Validate picker priority.
-  if config.picker_priority and type(config.picker_priority) ~= "table" then
-    table.insert(issues, "picker_priority must be a table")
+  -- Validate required structure
+  if type(config) ~= "table" then
+    table.insert(issues, "Configuration must be a table")
+    return false
   end
 
-  -- Validate cache TTL.
-  local cache_ttl = config.cache.ttl
-  if cache_ttl and (type(cache_ttl) ~= "number" or cache_ttl < 0) then
-    table.insert(issues, "cache.ttl must be a positive number")
+  -- Validate picker priority
+  if config.picker_priority then
+    if type(config.picker_priority) ~= "table" then
+      table.insert(issues, "picker_priority must be a table")
+    else
+      local valid_pickers = { "telescope", "fzf-lua", "snacks" }
+      for i, picker in ipairs(config.picker_priority) do
+        if type(picker) ~= "string" then
+          table.insert(issues, "picker_priority[" .. i .. "] must be a string")
+        elseif not vim.tbl_contains(valid_pickers, picker) then
+          table.insert(warnings, "Unknown picker '" .. picker .. "' in priority list")
+        end
+      end
+    end
   end
 
-  -- Validate detection max_depth.
-  local max_depth = config.detection.max_depth
-  if max_depth and (type(max_depth) ~= "number" or max_depth < 1) then
-    table.insert(issues, "detection.max_depth must be a positive number")
+  -- Validate cache configuration
+  if config.cache then
+    if type(config.cache) ~= "table" then
+      table.insert(issues, "cache must be a table")
+    else
+      local cache_ttl = config.cache.ttl
+      if cache_ttl ~= nil then
+        if type(cache_ttl) ~= "number" then
+          table.insert(issues, "cache.ttl must be a number")
+        elseif cache_ttl < 0 then
+          table.insert(issues, "cache.ttl must be non-negative")
+        elseif cache_ttl > 3600 then
+          table.insert(warnings, "cache.ttl > 1 hour may cause stale data issues")
+        end
+      end
+
+      if config.cache.enabled ~= nil and type(config.cache.enabled) ~= "boolean" then
+        table.insert(issues, "cache.enabled must be a boolean")
+      end
+    end
   end
 
+  -- Validate detection configuration
+  if config.detection then
+    if type(config.detection) ~= "table" then
+      table.insert(issues, "detection must be a table")
+    else
+      local max_depth = config.detection.max_depth
+      if max_depth ~= nil then
+        if type(max_depth) ~= "number" then
+          table.insert(issues, "detection.max_depth must be a number")
+        elseif max_depth < 1 then
+          table.insert(issues, "detection.max_depth must be at least 1")
+        elseif max_depth > 10 then
+          table.insert(warnings, "detection.max_depth > 10 may impact performance")
+        end
+      end
+    end
+  end
+
+  -- Validate UI configuration
+  if config.ui then
+    if type(config.ui) ~= "table" then
+      table.insert(issues, "ui must be a table")
+    else
+      if config.ui.window_height ~= nil then
+        if type(config.ui.window_height) ~= "number" or config.ui.window_height < 1 then
+          table.insert(issues, "ui.window_height must be a positive number")
+        end
+      end
+    end
+  end
+
+  -- Validate picker configurations
+  if config.pickers then
+    if type(config.pickers) ~= "table" then
+      table.insert(issues, "pickers must be a table")
+    end
+  end
+
+  -- Validate keymaps
+  if config.keymaps ~= nil and config.keymaps ~= false then
+    if type(config.keymaps) ~= "table" then
+      table.insert(issues, "keymaps must be a table or false")
+    end
+  end
+
+  -- Report issues and warnings
   if #issues > 0 then
     vim.notify(
-      "[monava] Configuration issues:\n" .. table.concat(issues, "\n"),
+      "[monava] Configuration errors:\n" .. table.concat(issues, "\n"),
+      vim.log.levels.ERROR
+    )
+  end
+
+  if #warnings > 0 then
+    vim.notify(
+      "[monava] Configuration warnings:\n" .. table.concat(warnings, "\n"),
       vim.log.levels.WARN
     )
   end
