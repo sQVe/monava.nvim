@@ -6,15 +6,16 @@ local M = {}
 local adapters = require("monava.adapters")
 local config = require("monava.config")
 local core = require("monava.core")
+local errors = require("monava.utils.errors")
 local utils = require("monava.utils")
 local validation = require("monava.utils.validation")
-local errors = require("monava.utils.errors")
 
 -- Default configuration.
 M._config = {}
 M._initialized = false
 M._packages_cache = nil
 M._packages_cache_timestamp = 0
+M._cache_lock = false
 
 -- Setup function called by users with comprehensive error handling.
 function M.setup(opts)
@@ -91,18 +92,47 @@ local function ensure_initialized()
   end
 end
 
--- Get packages with module-level caching (5-second cache)
+-- Get packages with module-level caching (5-second cache) and race condition protection
 local function get_cached_packages()
   local current_time = vim.loop.hrtime() / 1000000
   local cache_ttl = 5000 -- 5 seconds
 
-  -- Check if cache is valid
+  -- Check if cache is valid (without lock for performance)
   if M._packages_cache and (current_time - M._packages_cache_timestamp) < cache_ttl then
     return M._packages_cache
   end
 
-  -- Refresh cache
-  local packages = core.get_packages()
+  -- Prevent concurrent cache refreshes
+  if M._cache_lock then
+    -- Wait briefly for the other refresh to complete, then return current cache
+    vim.wait(100, function()
+      return not M._cache_lock
+    end, 10)
+    return M._packages_cache or {}
+  end
+
+  -- Acquire lock
+  M._cache_lock = true
+
+  -- Double-check cache validity after acquiring lock
+  if M._packages_cache and (current_time - M._packages_cache_timestamp) < cache_ttl then
+    M._cache_lock = false
+    return M._packages_cache
+  end
+
+  -- Refresh cache with error handling
+  local packages
+  local ok, result = pcall(core.get_packages)
+  if ok then
+    packages = result
+  else
+    errors.notify_error(
+      errors.CODES.CACHE_ERROR,
+      "Failed to refresh package cache: " .. tostring(result)
+    )
+    packages = M._packages_cache or {} -- Return stale cache on error
+  end
+
   if packages and not vim.tbl_isempty(packages) then
     M._packages_cache = packages
     M._packages_cache_timestamp = current_time
@@ -112,11 +142,21 @@ local function get_cached_packages()
     M._packages_cache_timestamp = 0
   end
 
-  return packages
+  -- Release lock
+  M._cache_lock = false
+
+  return packages or {}
 end
 
--- Invalidate the module-level package cache
+-- Invalidate the module-level package cache with lock protection
 function M._invalidate_package_cache()
+  -- Wait for any ongoing cache operations to complete
+  if M._cache_lock then
+    vim.wait(100, function()
+      return not M._cache_lock
+    end, 10)
+  end
+
   M._packages_cache = nil
   M._packages_cache_timestamp = 0
 end
