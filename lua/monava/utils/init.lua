@@ -82,6 +82,63 @@ function M.path_basename(path)
   return vim.fn.fnamemodify(path, ":t")
 end
 
+-- Path sanitization and security utilities
+function M.sanitize_path(path, base_path)
+  if not path or type(path) ~= "string" then
+    return nil, "Path must be a string"
+  end
+
+  if path == "" then
+    return nil, "Path cannot be empty"
+  end
+
+  -- Convert to absolute path for consistent checking
+  local abs_path = path
+  if not M.starts_with(path, "/") then
+    abs_path = M.path_join(base_path or vim.fn.getcwd(), path)
+  end
+
+  -- Resolve path to handle .. and . components
+  abs_path = vim.fn.resolve(abs_path)
+
+  -- Ensure path doesn't escape the base directory if provided
+  if base_path then
+    local abs_base = vim.fn.resolve(base_path)
+    if not M.starts_with(abs_path, abs_base) then
+      return nil, "Path escapes base directory"
+    end
+  end
+
+  -- Check for dangerous path components
+  if abs_path:match("%.%.") or abs_path:match("//") then
+    return nil, "Path contains dangerous components"
+  end
+
+  -- Check path length to prevent buffer overflow
+  if #abs_path > 4096 then
+    return nil, "Path too long (max 4096 characters)"
+  end
+
+  return abs_path, nil
+end
+
+function M.safe_file_access(path, base_path, operation_name)
+  local sanitized_path, err = M.sanitize_path(path, base_path)
+  if not sanitized_path then
+    M.handle_error(operation_name or "File access", "Path sanitization failed: " .. err)
+    return nil
+  end
+
+  -- Additional check: ensure path exists and is within allowed bounds
+  local stat = vim.loop.fs_stat(sanitized_path)
+  if not stat then
+    M.handle_error(operation_name or "File access", "Path does not exist: " .. sanitized_path)
+    return nil
+  end
+
+  return sanitized_path
+end
+
 -- JSON utilities with size limits and validation.
 function M.parse_json(content, max_size)
   if type(content) ~= "string" then

@@ -3,10 +3,20 @@
 
 local M = {}
 
--- Basic path validation to prevent obvious mistakes
+-- Enhanced path validation with security measures
 local function validate_path(path)
   if not path or type(path) ~= "string" or path == "" then
     return nil, "Invalid path: must be a non-empty string"
+  end
+
+  -- Check path length to prevent buffer overflow attacks
+  if #path > 4096 then
+    return nil, "Path too long (max 4096 characters)"
+  end
+
+  -- Check for null bytes and other dangerous characters
+  if path:find("\0") or path:find("\r") or path:find("\n") then
+    return nil, "Path contains invalid characters"
   end
 
   local abs_path = vim.fn.fnamemodify(path, ":p")
@@ -14,7 +24,19 @@ local function validate_path(path)
     return nil, "Invalid path: cannot resolve to absolute path"
   end
 
+  -- Resolve path to handle .. and . components properly
+  abs_path = vim.fn.resolve(abs_path)
   abs_path = abs_path:gsub("/$", "")
+
+  -- Enhanced directory traversal protection
+  if abs_path:match("%.%./") or abs_path:match("/%.%.$") or abs_path:match("^%.%.$") then
+    return nil, "Path contains directory traversal components"
+  end
+
+  -- Check for suspicious path patterns
+  if abs_path:match("//+") or abs_path:match("/%.%.?/") then
+    return nil, "Path contains suspicious patterns"
+  end
 
   -- Basic workspace boundary check - ensure we're in current working directory tree
   local cwd = vim.fn.getcwd():gsub("/$", "")
@@ -23,7 +45,11 @@ local function validate_path(path)
     local temp_paths = { "/tmp", vim.fn.stdpath("cache") }
     local in_temp = false
     for _, temp in ipairs(temp_paths) do
-      if abs_path:sub(1, #temp + 1) == temp .. "/" or abs_path == temp then
+      local normalized_temp = vim.fn.resolve(temp):gsub("/$", "")
+      if
+        abs_path:sub(1, #normalized_temp + 1) == normalized_temp .. "/"
+        or abs_path == normalized_temp
+      then
         in_temp = true
         break
       end
