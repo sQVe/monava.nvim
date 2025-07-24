@@ -4,6 +4,16 @@
 
 [High-level description of the feature and its place in the overall system]
 
+## Steering Document Alignment
+
+### Technical Standards (tech.md)
+
+[How the design follows documented technical patterns and standards]
+
+### Project Structure (structure.md)
+
+[How the implementation will follow project organization conventions]
+
 ## Architecture
 
 [Describe the overall architecture and design patterns used]
@@ -17,11 +27,13 @@ graph TD
 ## Components and Interfaces
 
 ### Component 1
+
 - **Purpose:** [What this component does]
 - **Interfaces:** [Public methods/APIs]
 - **Dependencies:** [What it depends on]
 
 ### Component 2
+
 - **Purpose:** [What this component does]
 - **Interfaces:** [Public methods/APIs]
 - **Dependencies:** [What it depends on]
@@ -29,25 +41,26 @@ graph TD
 ## Data Models
 
 ### Model 1
-```typescript
-interface Model1 {
-  id: string;
-  name: string;
-  // Additional properties
-}
+
+```
+[Define the structure of Model1 in your language]
+- id: [unique identifier type]
+- name: [string/text type]
+- [Additional properties as needed]
 ```
 
 ### Model 2
-```typescript
-interface Model2 {
-  id: string;
-  // Additional properties
-}
+
+```
+[Define the structure of Model2 in your language]
+- id: [unique identifier type]
+- [Additional properties as needed]
 ```
 
 ## Error Handling
 
 ### Error Scenarios
+
 1. **Scenario 1:** [Description]
    - **Handling:** [How to handle]
    - **User Impact:** [What user sees]
@@ -59,13 +72,16 @@ interface Model2 {
 ## Testing Strategy
 
 ### Unit Testing
+
 - [Unit testing approach]
 - [Key components to test]
 
 ### Integration Testing
+
 - [Integration testing approach]
 - [Key flows to test]
 
 ### End-to-End Testing
+
 - [E2E testing approach]
 - [User scenarios to test]

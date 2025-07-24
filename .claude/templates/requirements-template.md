@@ -4,6 +4,10 @@
 
 [Provide a brief overview of the feature, its purpose, and its value to users]
 
+## Alignment with Product Vision
+
+[Explain how this feature supports the goals outlined in product.md]
+
 ## Requirements
 
 ### Requirement 1
@@ -28,13 +32,17 @@
 ## Non-Functional Requirements
 
 ### Performance
+
 - [Performance requirements]
 
 ### Security
+
 - [Security requirements]
 
 ### Reliability
+
 - [Reliability requirements]
 
 ### Usability
+
 - [Usability requirements]
