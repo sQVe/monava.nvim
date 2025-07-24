@@ -573,7 +573,13 @@ end
 
 -- NPM/Yarn workspace package discovery.
 function M._get_npm_packages(root_path)
-  local package_json = fs.read_file(root_path .. "/package.json")
+  -- Validate root path before file operations
+  local sanitized_root = utils.safe_file_access(root_path, nil, "NPM package discovery")
+  if not sanitized_root then
+    return {}
+  end
+
+  local package_json = fs.read_file(sanitized_root .. "/package.json")
   if not package_json then
     return {}
   end
@@ -591,22 +597,26 @@ function M._get_npm_packages(root_path)
 
   local packages = {}
   for _, pattern in ipairs(workspaces) do
-    local matches = fs.find_packages(root_path, { "package.json" }, {
+    local matches = fs.find_packages(sanitized_root, { "package.json" }, {
       pattern = pattern,
       max_depth = 5,
     })
 
     for _, match in ipairs(matches) do
-      local pkg_json = fs.read_file(match.path .. "/package.json")
-      if pkg_json then
-        local pkg_data = utils.parse_json(pkg_json)
-        if pkg_data and pkg_data.name then
-          table.insert(packages, {
-            name = pkg_data.name,
-            path = match.path,
-            type = "npm-package",
-            config_file = match.path .. "/package.json",
-          })
+      local sanitized_match_path =
+        utils.safe_file_access(match.path, sanitized_root, "Package path validation")
+      if sanitized_match_path then
+        local pkg_json = fs.read_file(sanitized_match_path .. "/package.json")
+        if pkg_json then
+          local pkg_data = utils.parse_json(pkg_json)
+          if pkg_data and pkg_data.name then
+            table.insert(packages, {
+              name = pkg_data.name,
+              path = sanitized_match_path,
+              type = "npm-package",
+              config_file = sanitized_match_path .. "/package.json",
+            })
+          end
         end
       end
     end
@@ -617,7 +627,12 @@ end
 
 -- Nx workspace package discovery.
 function M._get_nx_packages(root_path)
-  local nx_json = fs.read_file(root_path .. "/nx.json")
+  local sanitized_root = utils.safe_file_access(root_path, nil, "Nx package discovery")
+  if not sanitized_root then
+    return {}
+  end
+
+  local nx_json = fs.read_file(sanitized_root .. "/nx.json")
   if not nx_json then
     return {}
   end
@@ -627,20 +642,26 @@ function M._get_nx_packages(root_path)
   local project_dirs = { "apps", "libs", "packages" }
 
   for _, dir in ipairs(project_dirs) do
-    local dir_path = root_path .. "/" .. dir
-    if fs.is_dir(dir_path) then
-      local entries = fs.scandir(dir_path, { type = "directory" })
+    local dir_path = sanitized_root .. "/" .. dir
+    local sanitized_dir_path =
+      utils.safe_file_access(dir_path, sanitized_root, "Nx directory validation")
+    if sanitized_dir_path and fs.is_dir(sanitized_dir_path) then
+      local entries = fs.scandir(sanitized_dir_path, { type = "directory" })
       for _, entry in ipairs(entries) do
-        local project_json = entry.path .. "/project.json"
-        local package_json = entry.path .. "/package.json"
+        local sanitized_entry_path =
+          utils.safe_file_access(entry.path, sanitized_root, "Nx entry validation")
+        if sanitized_entry_path then
+          local project_json = sanitized_entry_path .. "/project.json"
+          local package_json = sanitized_entry_path .. "/package.json"
 
-        if fs.exists(project_json) or fs.exists(package_json) then
-          table.insert(packages, {
-            name = entry.name,
-            path = entry.path,
-            type = "nx-project",
-            config_file = fs.exists(project_json) and project_json or package_json,
-          })
+          if fs.exists(project_json) or fs.exists(package_json) then
+            table.insert(packages, {
+              name = entry.name,
+              path = sanitized_entry_path,
+              type = "nx-project",
+              config_file = fs.exists(project_json) and project_json or package_json,
+            })
+          end
         end
       end
     end
