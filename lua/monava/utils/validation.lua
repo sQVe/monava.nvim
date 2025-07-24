@@ -1,13 +1,8 @@
--- lua/monava/utils/validation.lua
--- Input validation utilities following existing patterns from config.lua and utils/init.lua
-
 local M = {}
 
--- Constants for validation
 M.PACKAGE_NAME_PATTERN = "^[%w@][%w@%-%./]*$"
 M.MAX_PACKAGE_NAME_LENGTH = 255
 
--- Validate package name with comprehensive checks
 function M.validate_package_name(name)
   if name == nil then
     return false, "Package name cannot be nil"
@@ -32,7 +27,6 @@ function M.validate_package_name(name)
   return true, nil
 end
 
--- Validate configuration object (leveraging config.lua patterns)
 function M.validate_config(config)
   if config == nil then
     return false, "Configuration cannot be nil"
@@ -49,17 +43,15 @@ function M.validate_config(config)
   return true, nil
 end
 
--- Validate picker options (leveraging existing picker patterns)
 function M.validate_picker_opts(opts)
   if opts == nil then
-    return true, nil -- opts is optional
+    return true, nil
   end
 
   if type(opts) ~= "table" then
     return false, "Picker options must be a table"
   end
 
-  -- Validate specific picker option fields if present
   if opts.timeout and (type(opts.timeout) ~= "number" or opts.timeout <= 0) then
     return false, "Picker timeout must be a positive number"
   end
