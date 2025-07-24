@@ -19,7 +19,7 @@ This task breakdown covers both MEMORY.md immediate priorities AND comprehensive
   - _Leverage: existing vim.notify patterns throughout codebase_
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7_
 
-- [ ] 3. Add validation to M.files() function
+- [x] 3. Add validation to M.files() function
   - Update `lua/monava/init.lua` line 166 to add package name validation
   - Import validation module and call validate_package_name()
   - Handle validation failure with early return and error notification
