@@ -9,8 +9,8 @@ help:
 	@echo "  test          - Run all tests"
 	@echo "  test-verbose  - Run tests with verbose output"
 	@echo "  install-hooks - Install pre-commit git hooks"
-	@echo "  lint          - Run linting checks"
-	@echo "  format        - Format code (Lua and shell scripts)"
+	@echo "  lint          - Run linting checks (Lua and shell scripts)"
+	@echo "  format        - Format code (Lua, shell scripts, and markdown)"
 	@echo "  format-check  - Check code formatting without modifying"
 	@echo "  check         - Run all quality checks (lint + format-check + test)"
 	@echo "  clean         - Clean test cache and temporary files"
@@ -46,6 +46,13 @@ lint:
 		echo "luacheck not found. Install with: luarocks install luacheck"; \
 		exit 1; \
 	fi
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck scripts/*; \
+		echo "✅ Shell scripts passed linting"; \
+	else \
+		echo "shellcheck not found. Install with: sudo apt install shellcheck"; \
+		exit 1; \
+	fi
 
 # Format code
 format:
@@ -62,6 +69,13 @@ format:
 		echo "✅ Shell scripts formatted"; \
 	else \
 		echo "shfmt not found. Install with: go install mvdan.cc/sh/v3/cmd/shfmt@latest"; \
+		exit 1; \
+	fi
+	@if command -v prettier >/dev/null 2>&1; then \
+		prettier --write *.md; \
+		echo "✅ Markdown files formatted"; \
+	else \
+		echo "prettier not found. Install with: npm install -g prettier"; \
 		exit 1; \
 	fi
 
@@ -90,6 +104,17 @@ format-check:
 		echo "shfmt not found. Install with: go install mvdan.cc/sh/v3/cmd/shfmt@latest"; \
 		exit 1; \
 	fi
+	@if command -v prettier >/dev/null 2>&1; then \
+		if prettier --check *.md; then \
+			echo "✅ Markdown files are properly formatted"; \
+		else \
+			echo "❌ Markdown files need formatting. Run: make format"; \
+			exit 1; \
+		fi \
+	else \
+		echo "prettier not found. Install with: npm install -g prettier"; \
+		exit 1; \
+	fi
 
 # Run all quality checks
 check: lint format-check test
@@ -99,7 +124,6 @@ check: lint format-check test
 clean:
 	@echo "Cleaning test cache and temporary files..."
 	@rm -rf .tests/
-	@rm -rf ~/.local/share/nvim/lazy/
 	@find . -name "*.tmp" -delete 2>/dev/null || true
 	@find . -name ".DS_Store" -delete 2>/dev/null || true
 	@echo "✅ Cleanup complete"
