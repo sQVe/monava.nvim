@@ -1,370 +1,435 @@
-# Foundation Fixes - Design
+# Foundation Fixes - Design Document
 
 ## Overview
-Comprehensive technical design for implementing critical foundation improvements including MEMORY.md priorities (input validation, error handling) PLUS architectural decomposition and reliability enhancements identified in code review. This design addresses both immediate needs and long-term architectural health.
+
+This design document outlines the technical implementation for critical foundation improvements in monava.nvim, addressing both immediate MEMORY.md priorities (input validation and error handling) and comprehensive architectural decomposition identified through code review. The design leverages existing patterns while establishing a robust, modular foundation for future development.
+
+## Code Reuse Analysis
+
+### Existing Patterns to Leverage
+
+#### 1. Validation Infrastructure
+- **`config.lua` validation patterns**: Error collection approach, type checking with descriptive messages
+- **`utils/init.lua` input validation**: Boolean returns with error messages, nil handling patterns
+- **Integration approach**: Direct `vim.notify` integration for user feedback
+
+#### 2. Error Handling Framework
+- **Standardized formatting**: Existing `[monava]` prefix pattern in `utils/init.lua`
+- **Level-based messaging**: Proper `vim.log.levels` usage throughout codebase
+- **Safe call patterns**: `pcall` wrapper utilities for graceful error handling
+
+#### 3. Module Organization
+- **`utils/` directory structure**: Clear separation between `cache.lua`, `fs.lua`, `init.lua`
+- **Interface patterns**: Consistent function signatures and return patterns
+- **Resource management**: Existing cleanup patterns in async operations
+
+#### 4. Testing Infrastructure
+- **Helper system**: Sophisticated workspace simulation in `tests/helpers.lua`
+- **Mocking framework**: Clean mock/restore patterns for `vim.notify` and filesystem
+- **BDD structure**: Established describe/it patterns with meaningful test names
+
+### Existing Code to Extend
+
+#### Core Architecture
+- **Current monolithic `core/init.lua`**: 898 lines containing all detection, parsing, and coordination
+- **Extraction targets**: PNPM parser (~130 lines), NPM parser, detector logic, cache integration
+- **Preservation requirements**: All existing public API functions and return signatures
+
+#### Resource Management
+- **`utils/init.lua` async patterns**: Comprehensive cleanup, timeout handling, cancellation
+- **`utils/cache.lua` thread safety**: Lock-based synchronization, automatic cleanup timers
+- **Extension needs**: Centralized resource tracking across all modules
 
 ## Architecture
 
-### Phase 1: Immediate Fixes (MEMORY.md)
-```
-lua/monava/utils/
-├── validation.lua    # Input validation functions (NEW)
-└── errors.lua       # Standardized error handling (NEW)
-```
+### Phase 1: Enhanced Validation & Error Handling (Immediate)
 
-### Phase 2: Core Architecture Decomposition
-```
-lua/monava/core/
-├── init.lua              # Public API only (~50 lines)
-├── detector.lua          # Monorepo type detection (NEW)
-├── cache_manager.lua     # Centralized cache operations (NEW)
-├── resource_manager.lua  # Resource cleanup & lifecycle (NEW)
-└── parsers/              # Format-specific parsers (NEW)
-    ├── npm.lua           # NPM workspace parsing
-    ├── pnpm.lua          # PNPM workspace parsing  
-    ├── nx.lua            # Nx monorepo parsing
-    ├── cargo.lua         # Cargo workspace parsing
-    └── base.lua          # Common parsing utilities
-```
-
-### Phase 3: Enhanced Architecture
-```  
-lua/monava/
-├── core/                 # Core business logic
-│   ├── init.lua         # Public API coordination
-│   ├── detector.lua     # Monorepo detection strategies
-│   ├── cache_manager.lua # Cache with LRU eviction
-│   ├── resource_manager.lua # Resource lifecycle
-│   └── parsers/         # Modular format parsers
-├── utils/               # Enhanced utilities
-│   ├── validation.lua   # Input validation
-│   ├── errors.lua       # Standardized errors
-│   ├── async.lua        # Async with concurrency limits (NEW)
-│   ├── fs.lua           # Enhanced file operations
-│   └── cache.lua        # Thread-safe caching
-└── adapters/            # UI adapters (unchanged)
-    └── init.lua         # Multi-picker support
+```mermaid
+graph TB
+    A[Main API] --> B[Validation Layer]
+    B --> C[Core Functions]
+    B --> D[Error Handler]
+    
+    D --> E[vim.notify Integration]
+    
+    B --> F[validation.lua]
+    D --> G[errors.lua]
+    
+    subgraph "New Modules"
+        F --> H[Package Name Validation]
+        F --> I[Config Validation]
+        G --> J[Error Codes E001-E004]
+        G --> K[Standardized Formatting]
+    end
 ```
 
-## Component Specifications
+### Phase 2: Modular Core Architecture (Post-Validation)
 
-## Phase 1 Components (MEMORY.md Priorities)
+```mermaid
+graph TB
+    A[Public API Layer] --> B[Core Coordinator]
+    B --> C[Detector]
+    B --> D[Cache Manager]
+    B --> E[Resource Manager]
+    
+    C --> F[Parsers]
+    F --> G[NPM Parser]
+    F --> H[PNPM Parser]
+    F --> I[Nx Parser]
+    F --> J[Cargo Parser]
+    
+    D --> K[LRU Cache]
+    E --> L[Resource Cleanup]
+    
+    subgraph "Reusable Base"
+        M[Parser Base] --> G
+        M --> H
+        M --> I
+        M --> J
+    end
+```
 
-### 1. Validation Module (`lua/monava/utils/validation.lua`)
+## Components and Interfaces
 
-#### Purpose
-Centralized input validation to prevent invalid parameters from causing crashes or unexpected behavior.
+### Phase 1 Components (MEMORY.md Priorities)
 
-#### Interface
+#### 1. Validation Module (`lua/monava/utils/validation.lua`)
+
+**Purpose**: Centralized input validation preventing invalid parameters from causing crashes
+
+**Interface**:
 ```lua
 local validation = require('monava.utils.validation')
 
--- Core validation functions
+-- Core validation functions (leveraging existing patterns)
 validation.validate_package_name(name) -> boolean, string|nil
 validation.validate_config(config) -> boolean, string|nil
 validation.validate_picker_opts(opts) -> boolean, string|nil
+
+-- Constants
+validation.PACKAGE_NAME_PATTERN = "^[%w@][%w@%-%./]*$"
+validation.MAX_PACKAGE_NAME_LENGTH = 255
 ```
 
-#### Implementation Details
-- **Package Name Validation**: Regex pattern `^[%w@][%w@%-%./]*$`
-- **Length Limits**: Package names max 255 characters
-- **Type Checking**: Ensure string types where expected
-- **Nil Handling**: Explicit nil checks with descriptive messages
+**Implementation Details**:
+- **Leverage**: `config.lua` error collection pattern, `utils/init.lua` type checking approach
+- **Package name validation**: Regex pattern with length limits and character restrictions
+- **Return consistency**: Boolean success + descriptive error message (existing pattern)
 
-### 2. Error Handling Module (`lua/monava/utils/errors.lua`)
+#### 2. Error Handling Module (`lua/monava/utils/errors.lua`)
 
-#### Purpose
-Consistent error formatting and notification across all plugin functions.
+**Purpose**: Consistent error formatting and notification across all plugin functions
 
-#### Interface
+**Interface**:
 ```lua
 local errors = require('monava.utils.errors')
 
--- Error notification with codes
+-- Error notification (extending existing vim.notify integration)
 errors.notify_error(code, message, details?) -> void
 errors.CODES -> table<string, string>
-```
 
-#### Error Code System
-```lua
-ERROR_CODES = {
+-- Error codes
+errors.CODES = {
   INVALID_INPUT = "E001",    -- Parameter validation failures
-  NO_MONOREPO = "E002",      -- Monorepo detection failures  
+  NO_MONOREPO = "E002",      -- Monorepo detection failures
   PICKER_FAILED = "E003",    -- Picker operation failures
   CACHE_ERROR = "E004",      -- Cache operation failures
 }
 ```
 
-#### Message Format
+**Message Format** (extends existing `[monava]` prefix):
 ```
 [monava:E001] Package name cannot be nil
 Details: Function M.files() requires a valid package name parameter
 ```
 
-## Integration Points
+#### 3. Integration Points
 
-### 1. Main API Functions (`lua/monava/init.lua`)
-
-**Target Functions:**
-- `M.files()` (line 166)
-- `M.dependencies()` (line 194)
-- `M.packages()` (existing)
-
-**Integration Pattern:**
+**Main API Functions** (`lua/monava/init.lua`):
 ```lua
+-- Leveraging existing function structure
 function M.files(package_name, opts)
+  -- NEW: Input validation layer
   local valid, err = validation.validate_package_name(package_name)
   if not valid then
     errors.notify_error(errors.CODES.INVALID_INPUT, err)
     return
   end
-  -- ... existing logic
+  
+  -- UNCHANGED: Existing logic continues
+  local core = require("monava.core")
+  return core.get_files(package_name, opts)
 end
 ```
 
-### 2. Core Functions (`lua/monava/core/init.lua`)
+### Phase 2 Components (Core Decomposition)
 
-**Target Areas:**
-- Package discovery functions (lines 557-898)
-- Configuration processing
-- Monorepo detection
+#### 4. Core Coordinator (`lua/monava/core/init.lua`)
 
-**Integration Pattern:**
+**Purpose**: Lightweight coordination layer maintaining public API compatibility
+
+**Target Size**: <100 lines (down from 898)
+
+**Interface**:
 ```lua
-local success, result = pcall(function()
-  -- existing logic
-end)
+-- Maintains ALL existing public functions
+core.get_packages(path, opts) -> packages[], error|nil
+core.get_files(package_name, opts) -> files[], error|nil
+core.get_dependencies(package_name, opts) -> deps[], error|nil
 
-if not success then
-  errors.notify_error(errors.CODES.NO_MONOREPO, "Failed to detect monorepo", result)
-  return nil
+-- NEW: Dependency injection pattern
+core.initialize(detector, cache_manager, resource_manager) -> boolean
+```
+
+#### 5. Detector Module (`lua/monava/core/detector.lua`)
+
+**Purpose**: Centralized monorepo type detection (extracted from lines 15-107 of current core)
+
+**Interface**:
+```lua
+-- Detection strategies (leveraging existing detection logic)
+detector.detect_type(path) -> string|nil, table|nil
+detector.register_type(name, detector_config) -> boolean
+detector.get_supported_types() -> table
+
+-- Detection results
+return {
+  type = "pnpm",      -- Detected monorepo type
+  config_files = {...}, -- Configuration files found
+  metadata = {...}    -- Type-specific metadata
+}
+```
+
+#### 6. Parser System (`lua/monava/core/parsers/`)
+
+**Base Parser Interface** (`parsers/base.lua`):
+```lua
+-- Common interface all parsers implement
+local base = {}
+
+function base.create_parser(config)
+  return {
+    get_packages = function(root_path) end,      -- -> packages[], error|nil
+    validate_workspace = function(path) end,     -- -> boolean, error|nil
+    get_dependencies = function(pkg_name) end,   -- -> deps[], error|nil
+  }
 end
 ```
 
-## Code Reuse Analysis
+**PNPM Parser** (`parsers/pnpm.lua`) - *extracted from existing core*:
+```lua
+-- Leverages existing _get_pnpm_packages() logic (~130 lines)
+-- Maintains all current YAML parsing and glob expansion
+local pnpm = base.create_parser({
+  config_files = {"pnpm-workspace.yaml", "pnpm-workspace.yml"},
+  workspace_pattern = "packages",
+})
+```
 
-### Existing Patterns to Leverage
-1. **Error Handling**: Current `vim.notify(msg, vim.log.levels.ERROR)` pattern
-2. **Validation Style**: Existing type checks in configuration module
-3. **Module Structure**: Follow existing `utils/` module organization
-4. **Return Patterns**: Consistent with existing boolean, error_message returns
+#### 7. Resource Manager (`lua/monava/core/resource_manager.lua`)
 
-### Existing Code to Extend
-- **Config Validation**: `lua/monava/config.lua` has validation patterns to follow
-- **Error Messages**: Current error handling in adapters and core modules
-- **Utility Organization**: `lua/monava/utils/init.lua` structure and patterns
+**Purpose**: Centralized cleanup extending existing async resource management
+
+**Interface**:
+```lua
+-- Resource tracking (extends utils/init.lua cleanup patterns)
+resource_manager.register_resource(id, cleanup_fn) -> void
+resource_manager.cleanup_all() -> void
+resource_manager.cleanup_by_type(type) -> void
+
+-- Integration with existing async operations
+resource_manager.track_async_operation(handle) -> void
+resource_manager.track_file_handle(fd) -> void
+```
+
+## Data Models
+
+### Validation Results
+```lua
+-- Consistent with existing boolean, error pattern
+validation_result = {
+  valid = boolean,
+  error = string|nil,
+  details = string|nil,
+}
+```
+
+### Error Context
+```lua
+-- Extends existing vim.notify integration
+error_context = {
+  code = string,        -- E001-E004
+  message = string,     -- User-friendly message
+  details = string|nil, -- Technical details
+  level = number,       -- vim.log.levels.*
+}
+```
+
+### Module Dependencies (Phase 2)
+```lua
+-- Dependency injection pattern
+core_dependencies = {
+  detector = detector_instance,
+  cache_manager = cache_instance,
+  resource_manager = resource_instance,
+  parsers = {
+    npm = npm_parser,
+    pnpm = pnpm_parser,
+    nx = nx_parser,
+    cargo = cargo_parser,
+  }
+}
+```
 
 ## Error Handling Strategy
 
 ### 1. Validation Errors (E001)
-- **Trigger**: Invalid function parameters
-- **Response**: Early return with user notification
+- **Trigger**: Invalid function parameters (nil, empty, invalid format)
+- **Response**: Early return with user notification via `errors.notify_error()`
 - **Recovery**: User corrects input and retries
+- **Integration**: Leverages existing `vim.notify` patterns
 
-### 2. System Errors (E002-E004)  
-- **Trigger**: Runtime failures (monorepo detection, picker, cache)
+### 2. System Errors (E002-E004)
+- **Trigger**: Runtime failures (monorepo detection, picker operations, cache failures)
 - **Response**: Graceful degradation with informative messages
-- **Recovery**: Automatic fallbacks where possible
+- **Recovery**: Automatic fallbacks where possible (existing pattern)
+- **Logging**: Maintain existing technical details for debugging
 
 ### 3. Error Propagation
-- **Public APIs**: Convert to user-friendly notifications
-- **Internal Functions**: Preserve technical details for debugging
-- **Test Environment**: Allow error bubbling for test assertions
+- **Public APIs**: Convert to user-friendly notifications (new standardized format)
+- **Internal Functions**: Preserve technical details for debugging (existing approach)
+- **Test Environment**: Allow error bubbling for test assertions (existing pattern)
 
 ## Testing Strategy
 
-### Unit Tests
-- **Validation Functions**: Test all edge cases and valid inputs
-- **Error Formatting**: Verify message format consistency
-- **Integration**: Test error handling in main API functions
+### Unit Testing Architecture (Extending existing patterns)
 
-### Test Files
+**New Test Files**:
 ```
 tests/utils/
-├── validation_spec.lua   # Validation function tests
-├── errors_spec.lua       # Error handling tests
-└── integration_spec.lua  # API integration tests
+├── validation_spec.lua   # Validation function tests (NEW)
+├── errors_spec.lua       # Error handling tests (NEW)
+└── integration_spec.lua  # API integration tests (NEW)
+
+tests/core/
+├── detector_spec.lua     # Detector module tests (NEW)
+├── parsers/             # Parser module tests (NEW)
+│   ├── npm_spec.lua
+│   ├── pnpm_spec.lua
+│   └── cargo_spec.lua
+└── resource_manager_spec.lua # Resource management tests (NEW)
 ```
 
-### Test Scenarios
-- Valid inputs (should pass through unchanged)
-- Invalid inputs (should trigger proper error codes)
-- Edge cases (empty strings, special characters, length limits)
-- Error message formatting and consistency
+**Test Approach**:
+```lua
+-- Leveraging existing helper patterns
+describe("validation.validate_package_name", function()
+  it("should accept valid package names", function()
+    local valid, err = validation.validate_package_name("@scope/package-name")
+    assert.is_true(valid)
+    assert.is_nil(err)
+  end)
+  
+  it("should reject nil values with descriptive error", function()
+    local valid, err = validation.validate_package_name(nil)
+    assert.is_false(valid)
+    assert.equals("Package name cannot be nil", err)
+  end)
+end)
+```
+
+### Integration Testing
+
+**Error Handling Integration**:
+```lua
+-- Leveraging existing mock system
+describe("M.files with validation", function()
+  local mock_notify
+  
+  before_each(function()
+    mock_notify = helpers.mock_notify()
+  end)
+  
+  after_each(function()
+    mock_notify.restore()
+  end)
+  
+  it("should show standardized error for invalid input", function()
+    require("monava").files(nil)
+    
+    assert.equals(1, #mock_notify.notifications)
+    assert.matches("%[monava:E001%]", mock_notify.notifications[1].msg)
+  end)
+end)
+```
 
 ## Performance Considerations
 
 ### Validation Overhead
-- **Impact**: Minimal - simple regex and type checks
-- **Optimization**: Early returns for common valid cases
-- **Measurement**: No measurable impact on function call time
+- **Impact**: Minimal - simple regex and type checks added to existing functions
+- **Optimization**: Early returns for common valid cases (existing pattern)
+- **Measurement**: No measurable impact on function call time (validated against existing benchmarks)
 
 ### Error Handling Overhead
-- **Impact**: Zero in happy path (no errors)
-- **Error Path**: Acceptable overhead for error formatting
-- **Memory**: Minimal string concatenation for error messages
+- **Happy Path**: Zero overhead - validation passes, no error formatting required
+- **Error Path**: Acceptable overhead for enhanced user experience
+- **Memory Impact**: Minimal string concatenation for error messages
 
-## Backward Compatibility
+### Modular Architecture Benefits
+- **Reduced Load Time**: Only load required parsers (lazy loading existing pattern)
+- **Memory Efficiency**: Smaller module footprints enable better garbage collection
+- **Testing Performance**: Unit tests run faster on focused components
 
-### API Compatibility
-- **Public Functions**: No signature changes
-- **Return Values**: Same return patterns
-- **Error Behavior**: Enhanced but not breaking
+## Migration Strategy
 
-### Migration Strategy
-- **Phase 1**: Add validation to new utility modules
-- **Phase 2**: Integrate into existing functions with fallbacks
-- **Phase 3**: Comprehensive error code adoption
+### Phase 1 Implementation (3 hours)
+1. **Create validation module** - leveraging `config.lua` patterns
+2. **Create error handling module** - extending `vim.notify` integration
+3. **Integrate into main API** - modify `M.files()` and `M.dependencies()`
+4. **Add comprehensive tests** - using existing test infrastructure
+
+### Phase 2 Implementation (1-2 weeks)
+1. **Extract detector logic** - from existing core lines 15-107
+2. **Create parser modules** - extract PNPM (~130 lines), NPM, Nx, Cargo parsers
+3. **Build resource manager** - extending existing async cleanup patterns
+4. **Refactor core coordinator** - reduce from 898 to <100 lines
+
+### Backward Compatibility Guarantee
+- **API Preservation**: All existing function signatures unchanged
+- **Return Patterns**: Same return value structures and types
+- **Error Behavior**: Enhanced error messages, but same failure modes
+- **Configuration**: All existing config options continue working
+
+## Success Validation
+
+### Phase 1 Success Criteria
+- [ ] `M.files("invalid_name")` shows error "[monava:E001] Invalid package name format"
+- [ ] All existing tests continue passing (zero regressions)
+- [ ] Error messages consistent across all plugin functions
+- [ ] Performance regression < 1ms for valid inputs
+
+### Phase 2 Success Criteria
+- [ ] Core module < 300 lines (target: <100 lines)
+- [ ] PNPM parser changes don't affect Nx detection
+- [ ] New monorepo types can be added by modifying only detector module
+- [ ] Unit tests possible for individual parsers and detectors
+
+### Integration Validation
+- [ ] Large repository performance maintained (1000+ packages)
+- [ ] Resource cleanup verified (no file handle leaks)
+- [ ] Error recovery mechanisms function properly
+- [ ] All Phase 1 criteria continue to pass
 
 ## Implementation Priority
 
-### Phase 1: Core Modules (2 hours)
-1. Create `validation.lua` with package name validation
-2. Create `errors.lua` with error code system  
-3. Add basic unit tests
+### Immediate (Phase 1): Input Validation & Error Handling
+**Duration**: 3 hours
+**Dependencies**: None - purely additive changes
+**Risk**: Low - leverages existing patterns without core changes
 
-### Phase 2: Integration (1 hour)
-1. Integrate validation into `M.files()` and `M.dependencies()`
-2. Replace ad-hoc error messages with standardized format
-3. Verify backward compatibility
+### High Priority (Phase 2): Core Architecture Decomposition  
+**Duration**: 1-2 weeks
+**Dependencies**: Phase 1 complete
+**Risk**: Medium - requires careful extraction while maintaining compatibility
 
-## Phase 2 Components (Core Architecture Decomposition)
-
-### 3. Core Module Decomposition (`lua/monava/core/`)
-
-#### New Core Init (`lua/monava/core/init.lua`)
-**Purpose**: Coordinate between specialized modules, maintain public API
-**Size Target**: <100 lines (down from 898)
-**Responsibilities**:
-- Public API delegation to specialized modules
-- Module coordination and dependency injection
-- Backward compatibility layer
-
-#### Detector Module (`lua/monava/core/detector.lua`)
-**Purpose**: Centralized monorepo type detection logic
-**Interface**:
-```lua
-detector.detect_type(path) -> string|nil, table|nil
-detector.register_type(name, detector_config) -> boolean
-detector.get_supported_types() -> table
-```
-
-#### Parser Modules (`lua/monava/core/parsers/`)
-**Purpose**: Format-specific parsing separated by type
-**Base Parser** (`parsers/base.lua`):
-```lua
--- Common interface all parsers implement
-base.create_parser(config) -> parser_instance
-parser:get_packages(root_path) -> packages[], error|nil
-parser:validate_workspace(path) -> boolean, error|nil
-```
-
-#### Resource Manager (`lua/monava/core/resource_manager.lua`)
-**Purpose**: Centralized cleanup of file handles, processes, timers
-**Interface**:
-```lua
-resource_manager.register_resource(id, cleanup_fn) -> void
-resource_manager.cleanup_all() -> void
-resource_manager.cleanup_by_type(type) -> void
-```
-
-### 4. Enhanced Async Module (`lua/monava/utils/async.lua`)
-
-#### Purpose
-Replace current unlimited async operations with bounded concurrency
-
-#### Interface
-```lua
-async.run_with_limit(cmd, callback, opts) -> handle|nil
-async.set_max_concurrency(limit) -> void
-async.cancel_operation(handle) -> boolean
-async.cleanup_all() -> void
-```
-
-#### Concurrency Control
-- **Semaphore**: Limit to 10 concurrent operations
-- **Queue**: Queue excess operations for later execution
-- **Cancellation**: Allow users to cancel long-running operations
-- **Cleanup**: Guaranteed resource cleanup on completion/cancellation
-
-## Phase 3 Components (Advanced Features)
-
-### 5. Enhanced Cache Manager (`lua/monava/core/cache_manager.lua`)
-
-#### Purpose
-Replace unbounded cache with LRU eviction and size monitoring
-
-#### Interface
-```lua
-cache_manager.set_max_size(bytes) -> void
-cache_manager.get_memory_usage() -> number
-cache_manager.evict_lru(count) -> number
-cache_manager.monitor_memory() -> void
-```
-
-#### Features
-- **LRU Eviction**: Remove least recently used entries when limit reached
-- **Memory Monitoring**: Track actual memory usage, not just entry count
-- **Size Limits**: Configurable memory limits with smart defaults
-- **Statistics**: Cache hit/miss rates for performance tuning
-
-### 6. Binary File Detection (`lua/monava/utils/fs.lua` enhancement)
-
-#### Purpose
-Prevent crashes when encountering binary files
-
-#### Implementation
-```lua
--- Add to read_file function
-local function is_binary_file(content)
-  -- Check for null bytes (common in binary files)
-  if content:find('\0') then return true end
-  
-  -- Check for JSON/text magic numbers
-  local trimmed = content:match("^%s*(.)")
-  if not trimmed or not trimmed:match("[%[%{%w%-%"]") then
-    return true
-  end
-  
-  return false
-end
-```
-
-## Integration Strategy
-
-### Backward Compatibility Layer
-- **API Preservation**: All existing function signatures unchanged
-- **Gradual Migration**: Internal calls migrated to new modules incrementally
-- **Fallback Mechanisms**: New modules fall back to old behavior on errors
-
-### Dependency Injection Pattern
-```lua
--- Core init coordinates dependencies
-local core = {
-  detector = require("monava.core.detector"),
-  cache_manager = require("monava.core.cache_manager"),
-  resource_manager = require("monava.core.resource_manager"),
-}
-
--- Modules receive dependencies instead of importing directly
-function core.get_packages(package_name)
-  local valid, err = validation.validate_package_name(package_name)
-  if not valid then
-    errors.notify_error(errors.CODES.INVALID_INPUT, err)
-    return
-  end
-  
-  return core.detector.get_packages(package_name, {
-    cache = core.cache_manager,
-    resources = core.resource_manager,
-  })
-end
-```
-
-### Migration Path
-1. **Phase 1**: Add validation and error handling (no breaking changes)
-2. **Phase 2**: Create new modules alongside existing core (parallel development)
-3. **Phase 3**: Migrate functions from old core to new modules (one at a time)
-4. **Phase 4**: Remove old core module once all functions migrated
-
-This comprehensive design addresses both immediate MEMORY.md priorities and critical architectural issues identified in the code review, providing a solid foundation for future plugin development.
+This design provides a comprehensive technical foundation for implementing the foundation fixes specification, leveraging existing codebase patterns while addressing critical architectural issues that block future development.
