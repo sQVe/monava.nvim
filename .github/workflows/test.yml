@@ -66,8 +66,14 @@ jobs:
       - name: Install luacheck
         run: luarocks install luacheck
       
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      
       - name: Run luacheck
         run: luacheck lua/ tests/
+      
+      - name: Run shellcheck
+        run: shellcheck scripts/*
 
   format:
     runs-on: ubuntu-latest
@@ -88,8 +94,19 @@ jobs:
           go install mvdan.cc/sh/v3/cmd/shfmt@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
       
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install prettier
+        run: npm install -g prettier
+      
       - name: Check Lua formatting
         run: stylua --check lua/ tests/
       
       - name: Check shell formatting
         run: shfmt -d scripts/
+      
+      - name: Check markdown formatting
+        run: prettier --check *.md

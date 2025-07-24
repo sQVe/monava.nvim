@@ -24,6 +24,8 @@ DESCRIPTION:
     This script installs pre-commit hooks that will:
     - Format Lua files with stylua
     - Format shell scripts with shfmt
+    - Run shellcheck on shell scripts
+    - Format markdown files with prettier
     - Run basic linting checks
     - Prevent commits if formatting or linting fails
 
@@ -31,6 +33,8 @@ REQUIREMENTS:
     - Git repository
     - stylua (install with: cargo install stylua)
     - shfmt (install with: go install mvdan.cc/sh/v3/cmd/shfmt@latest)
+    - shellcheck (install with: sudo apt install shellcheck)
+    - prettier (install with: npm install -g prettier)
 
 EOF
 }
@@ -95,6 +99,7 @@ staged_files=$(git diff --cached --name-only --diff-filter=ACM)
 # Arrays to hold files by type
 lua_files=()
 shell_files=()
+markdown_files=()
 
 # Categorize staged files
 while IFS= read -r file; do
@@ -108,13 +113,16 @@ while IFS= read -r file; do
           shell_files+=("$file")
         fi
         ;;
+      *.md)
+        markdown_files+=("$file")
+        ;;
     esac
   fi
 done <<< "$staged_files"
 
 # Check if we have any files to process
-if [[ ${#lua_files[@]} -eq 0 && ${#shell_files[@]} -eq 0 ]]; then
-  print_success "No Lua or shell files to check."
+if [[ ${#lua_files[@]} -eq 0 && ${#shell_files[@]} -eq 0 && ${#markdown_files[@]} -eq 0 ]]; then
+  print_success "No Lua, shell, or markdown files to check."
   exit 0
 fi
 
@@ -153,6 +161,40 @@ if [[ ${#shell_files[@]} -gt 0 ]]; then
   else
     print_warning "⚠️  shfmt not found. Install with: go install mvdan.cc/sh/v3/cmd/shfmt@latest"
   fi
+
+  # Run shellcheck on shell files
+  echo "🔍 Running shellcheck on shell files..."
+  
+  if command -v shellcheck >/dev/null 2>&1; then
+    for file in "${shell_files[@]}"; do
+      if shellcheck "$file"; then
+        print_success "✅ $file passed shellcheck"
+      else
+        print_error "❌ $file failed shellcheck"
+        checks_failed=true
+      fi
+    done
+  else
+    print_warning "⚠️  shellcheck not found. Install with: sudo apt install shellcheck"
+  fi
+fi
+
+# Format markdown files with prettier
+if [[ ${#markdown_files[@]} -gt 0 ]]; then
+  echo "📝 Formatting markdown files..."
+  
+  if command -v prettier >/dev/null 2>&1; then
+    for file in "${markdown_files[@]}"; do
+      if prettier --check "$file" >/dev/null 2>&1; then
+        print_success "✅ $file is properly formatted"
+      else
+        print_error "❌ $file needs formatting. Run: prettier --write $file"
+        checks_failed=true
+      fi
+    done
+  else
+    print_warning "⚠️  prettier not found. Install with: npm install -g prettier"
+  fi
 fi
 
 # Run luacheck if available
@@ -174,6 +216,8 @@ if [[ "$checks_failed" == "true" ]]; then
   echo "💡 Quick fixes:"
   echo "   - Format Lua files: stylua lua/ tests/"
   echo "   - Format shell files: shfmt -w scripts/"
+  echo "   - Check shell scripts: shellcheck scripts/*"
+  echo "   - Format markdown files: prettier --write *.md"
   echo "   - Check linting: luacheck lua/ tests/"
   echo ""
   exit 1
@@ -223,6 +267,8 @@ main() {
 	print_info "Required tools for full functionality:"
 	print_info "  - stylua: cargo install stylua"
 	print_info "  - shfmt: go install mvdan.cc/sh/v3/cmd/shfmt@latest"
+	print_info "  - shellcheck: sudo apt install shellcheck"
+	print_info "  - prettier: npm install -g prettier"
 	print_info "  - luacheck: luarocks install luacheck"
 }
 
