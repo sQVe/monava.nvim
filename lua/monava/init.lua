@@ -242,8 +242,12 @@ function M.dependencies(package_name)
   ensure_initialized()
 
   -- Validate package_name if provided
-  if package_name and not utils.validate_input(package_name, "string", "package_name") then
-    return
+  if package_name then
+    local valid, err = validation.validate_package_name(package_name)
+    if not valid then
+      errors.notify_error(errors.CODES.INVALID_INPUT, err)
+      return
+    end
   end
 
   if not package_name then
