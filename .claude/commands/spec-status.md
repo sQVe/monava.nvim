@@ -3,11 +3,13 @@
 Show current status of all specs or a specific spec.
 
 ## Usage
+
 ```
 /spec-status [feature-name]
 ```
 
 ## Instructions
+
 Display the current status of spec workflows.
 
 1. **If no feature-name provided:**
@@ -37,6 +39,7 @@ Display the current status of spec workflows.
    ```
 
 ## Workflow Phases
+
 - **Requirements**: Gathering and documenting requirements
 - **Design**: Creating technical design and architecture
 - **Tasks**: Breaking down into implementation tasks

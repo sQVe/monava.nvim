@@ -3,11 +3,13 @@
 List all specs in the current project.
 
 ## Usage
+
 ```
 /spec-list
 ```
 
 ## Instructions
+
 Display a comprehensive list of all specs in the project.
 
 1. **Scan Directory**
@@ -23,6 +25,7 @@ Display a comprehensive list of all specs in the project.
    - Brief description from requirements
 
 3. **Output Format**
+
    ```
    📋 Project Specs Overview
 
